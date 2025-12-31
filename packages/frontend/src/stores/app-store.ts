@@ -72,6 +72,8 @@ interface AppStore {
   setActiveTab: (tab: AnalysisTab) => void
   openEntityCard: (entity: GraphNode, position: { x: number; y: number }) => void
   closeEntityCard: () => void
+  setCurrentTime: (time: number) => void
+  setIsPlaying: (playing: boolean) => void
 
   // === API Actions ===
   fetchSources: () => Promise<void>
@@ -180,6 +182,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   setActivePlayer: (player) => set({ activePlayer: player, isPlaying: false }),
   setActiveTab: (tab) => set({ activeTab: tab }),
+  setCurrentTime: (time) => set({ currentTime: time }),
+  setIsPlaying: (playing) => set({ isPlaying: playing }),
 
   openEntityCard: (entity, position) => set({
     entityCard: {
