@@ -1,0 +1,195 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --radius: 0.75rem;
+
+  /* v10.0 Floating Islands Design System */
+  --bg-app: #050507;
+  --bg-panel: #121214;
+  --bg-element: #1c1c1f;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-hover: rgba(255, 255, 255, 0.15);
+  --text-main: #f4f4f5;
+  --text-sub: #a1a1aa;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  font-family: 'Inter', -apple-system, system-ui, sans-serif;
+  overflow: hidden;
+  background-image: radial-gradient(circle at center, #111 0%, #050507 100%);
+}
+
+/* Floating panel base class */
+.floating-panel {
+  background-color: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.1),
+    0 2px 4px -1px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Scrollbar styling */
+.scroller::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.scroller::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.scroller::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 3px;
+}
+
+.scroller::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Input styling */
+.input-industrial {
+  background: #18181b;
+  border: 1px solid #27272a;
+  color: white;
+  transition: 0.2s;
+  font-size: 12px;
+  border-radius: 0.5rem;
+}
+
+.input-industrial:focus {
+  border-color: #71717a;
+  background: #09090b;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.05);
+}
+
+/* Dropdown styling */
+.select-industrial {
+  background: #18181b;
+  border: 1px solid #27272a;
+  color: #d4d4d8;
+  font-size: 11px;
+  border-radius: 0.5rem;
+  padding: 4px 8px;
+  outline: none;
+  cursor: pointer;
+}
+
+.select-industrial:hover {
+  border-color: #52525b;
+}
+
+/* Source card */
+.source-card {
+  background-color: transparent;
+  border: 1px solid transparent;
+  border-radius: 0.75rem;
+  transition: all 0.2s ease;
+}
+
+.source-card:hover {
+  background-color: var(--bg-element);
+  border-color: var(--border);
+}
+
+.source-card.active {
+  background-color: #27272a;
+  border-color: #3f3f46;
+}
+
+/* Tab button */
+.tab-btn {
+  position: relative;
+  color: #71717a;
+  transition: color 0.2s;
+}
+
+.tab-btn:hover {
+  color: #e4e4e7;
+}
+
+.tab-btn.active {
+  color: white;
+}
+
+.tab-btn.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 30%;
+  right: 30%;
+  height: 3px;
+  background: white;
+  border-radius: 99px 99px 0 0;
+}
+
+/* Chat bubbles */
+.bubble-ai {
+  background: #1c1c1f;
+  border: 1px solid #27272a;
+  color: #e4e4e7;
+  border-radius: 1rem;
+  border-top-left-radius: 4px;
+}
+
+.bubble-user {
+  background: #3f3f46;
+  color: white;
+  border-radius: 1rem;
+  border-top-right-radius: 4px;
+}
+
+/* Topbar button */
+.topbar-btn {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(24, 24, 27, 0.55);
+  transition: 0.15s ease;
+  border-radius: 0.75rem;
+}
+
+.topbar-btn:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(39, 39, 42, 0.65);
+}
+
+.topbar-btn:active {
+  transform: translateY(1px);
+}
+
+.topbar-pill {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(9, 9, 11, 0.35);
+  border-radius: 999px;
+}
+
+/* Animation */
+.fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
