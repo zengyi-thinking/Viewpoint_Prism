@@ -1,38 +1,42 @@
-"""Application configuration management."""
+from pathlib import Path
 from pydantic_settings import BaseSettings
-from typing import Optional
 from functools import lru_cache
+
+# Project root directory (where .env is located)
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent
+ENV_FILE = PROJECT_ROOT / ".env"
 
 
 class Settings(BaseSettings):
-    """Application settings with environment variable support."""
+    """Application settings loaded from environment variables."""
 
-    # API Keys
-    dashscope_api_key: str = ""
-    modelscope_api_key: str = ""
+    # Environment
+    env: str = "development"
+
+    # Server
+    host: str = "0.0.0.0"
+    port: int = 8000
 
     # Database
     database_url: str = "sqlite+aiosqlite:///./data/viewpoint_prism.db"
 
-    # File Storage
-    upload_dir: str = "data/uploads"
-    temp_dir: str = "data/temp"
-    generated_dir: str = "data/generated"  # For creative video output
-    max_upload_size: int = 1073741824  # 1GB
-
     # ChromaDB
     chroma_db_dir: str = "data/chromadb"
 
-    # AI Services
-    asr_model: str = "paraformer-v2"
-    vl_model: str = "qwen-vl-max"
-    llm_model: str = "qwen2.5-72b-instruct"
+    # DashScope API (Alibaba Cloud - Qwen-VL & Paraformer)
+    dashscope_api_key: str = ""
 
-    # Task Settings
-    max_concurrent_frames: int = 10
+    # ModelScope API (for LLM inference)
+    modelscope_api_key: str = ""
+    modelscope_model: str = "Qwen/Qwen2.5-Coder-32B-Instruct"
+
+    # Upload and Temp directories
+    upload_dir: str = "data/uploads"
+    temp_dir: str = "data/temp"
+    max_upload_size: int = 1073741824  # 1GB
 
     class Config:
-        env_file = ".env"
+        env_file = str(ENV_FILE)
         case_sensitive = False
 
 

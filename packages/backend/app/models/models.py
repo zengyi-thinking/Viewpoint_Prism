@@ -1,17 +1,16 @@
-"""SQLAlchemy database models."""
-import uuid
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Float, ForeignKey, Enum
+from sqlalchemy.orm import relationship
 from datetime import datetime
-from sqlalchemy import String, Float, DateTime, Text, JSON, Integer
-from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.types import Enum as SQLEnum
-import enum
+from enum import Enum as PyEnum
+import uuid as uuid_lib
+
 from app.core.database import Base
 
 
-class SourceStatus(str, enum.Enum):
-    """Source processing status."""
+class SourceStatus(str, PyEnum):
+    """Video source processing status."""
+    IMPORTED = "imported"  # Imported but not yet analyzed (Phase 12: Lazy Analysis)
     UPLOADED = "uploaded"
-    IMPORTED = "imported"       # Phase 12: Lazy Analysis
     PROCESSING = "processing"
     ANALYZING = "analyzing"
     DONE = "done"
@@ -19,52 +18,64 @@ class SourceStatus(str, enum.Enum):
 
 
 class Source(Base):
-    """Video source model."""
+    """Video source model for storing uploaded videos."""
+
     __tablename__ = "sources"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    title: Mapped[str] = mapped_column(String, index=True)
-    file_path: Mapped[str] = mapped_column(String, unique=True)
-    url: Mapped[str] = mapped_column(String, default="")
-    file_type: Mapped[str] = mapped_column(String, default="video")
-    platform: Mapped[str] = mapped_column(String, default="local")
-    duration: Mapped[float | None] = mapped_column(Float, nullable=True)
-    thumbnail: Mapped[str | None] = mapped_column(String, nullable=True)
-    status: Mapped[str] = mapped_column(SQLEnum(SourceStatus), default=SourceStatus.UPLOADED)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid_lib.uuid4()))
+    title = Column(String(255), nullable=False)
+    file_path = Column(String(512), nullable=False)
+    url = Column(String(1024), nullable=True)  # Accessible URL for frontend
+    file_type = Column(String(50), default="video")  # video, pdf, audio
+    platform = Column(String(50), default="local")  # tiktok, bilibili, youtube, local
+    duration = Column(Float, nullable=True)  # Duration in seconds
+    thumbnail = Column(String(512), nullable=True)
+    status = Column(String(20), default=SourceStatus.UPLOADED.value)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    evidences = relationship("Evidence", back_populates="source", cascade="all, delete-orphan")
 
 
 class Evidence(Base):
-    """Evidence chunk (ASR/frame)."""
+    """Evidence model for storing transcript segments and keyframes."""
+
     __tablename__ = "evidences"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    source_id: Mapped[str] = mapped_column(String, index=True)
-    chunk_type: Mapped[str] = mapped_column(String)  # 'asr' or 'frame'
-    timestamp: Mapped[float] = mapped_column(Float)
-    content: Mapped[str] = mapped_column(Text)
-    meta_data: Mapped[dict] = mapped_column(JSON, default={})
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid_lib.uuid4()))
+    source_id = Column(String(36), ForeignKey("sources.id"), nullable=False)
+    start_time = Column(Float, nullable=False)  # Start time in seconds
+    end_time = Column(Float, nullable=False)  # End time in seconds
+    text_content = Column(Text, nullable=True)  # Transcript text
+    frame_path = Column(String(512), nullable=True)  # Keyframe image path
+    embedding_id = Column(String(128), nullable=True)  # Vector DB reference
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    source = relationship("Source", back_populates="evidences")
 
 
 class AnalysisResult(Base):
-    """Cached analysis results."""
+    """Analysis result model for storing AI analysis outputs."""
+
     __tablename__ = "analysis_results"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    source_ids: Mapped[list] = mapped_column(JSON)
-    conflicts: Mapped[dict] = mapped_column(JSON, default={})
-    graph: Mapped[dict] = mapped_column(JSON, default={"nodes": [], "links": []})
-    timeline: Mapped[list] = mapped_column(JSON, default=[])
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid_lib.uuid4()))
+    session_id = Column(String(64), nullable=False, index=True)
+    result_type = Column(String(50), nullable=False)  # conflict, graph, timeline
+    data = Column(Text, nullable=False)  # JSON string
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class ChatMessage(Base):
-    """Chat message history."""
+    """Chat message model for storing conversation history."""
+
     __tablename__ = "chat_messages"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    session_id: Mapped[str] = mapped_column(String, index=True)
-    role: Mapped[str] = mapped_column(String)  # 'user' or 'assistant'
-    content: Mapped[str] = mapped_column(Text)
-    references: Mapped[list] = mapped_column(JSON, default=[])
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid_lib.uuid4()))
+    session_id = Column(String(64), nullable=False, index=True)
+    role = Column(String(20), nullable=False)  # user, assistant
+    content = Column(Text, nullable=False)
+    references = Column(Text, nullable=True)  # JSON string of references
+    created_at = Column(DateTime, default=datetime.utcnow)

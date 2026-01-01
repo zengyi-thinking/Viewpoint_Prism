@@ -1,27 +1,25 @@
-"""Services module initialization."""
-from app.services.intelligence import get_intelligence_service, IntelligenceService
-from app.services.analysis_service import get_analysis_service, AnalysisService
-from app.services.rag_service import get_rag_service, RAGService
-from app.services.vector_store import get_vector_store, VectorStore
-from app.services.media_processor import MediaProcessor
-from app.services.creator import get_creator_service, CreatorService
-from app.services.director import get_director_service, DirectorService
-from app.services.crawler import get_crawler_service, CrawlerService
+# Services module
+from .media_processor import MediaProcessor, get_media_processor
+from .intelligence import IntelligenceService, get_intelligence_service
+from .vector_store import VectorStore, get_vector_store
+from .rag_service import RAGService, get_rag_service
+from .analysis_service import AnalysisService, get_analysis_service
+from .creator import CreatorService, get_creator_service
+from .crawler import CrawlerService, get_crawler_service
 
 __all__ = [
-    "get_intelligence_service",
-    "IntelligenceService",
-    "get_analysis_service",
-    "AnalysisService",
-    "get_rag_service",
-    "RAGService",
-    "get_vector_store",
-    "VectorStore",
     "MediaProcessor",
-    "get_creator_service",
+    "get_media_processor",
+    "IntelligenceService",
+    "get_intelligence_service",
+    "VectorStore",
+    "get_vector_store",
+    "RAGService",
+    "get_rag_service",
+    "AnalysisService",
+    "get_analysis_service",
     "CreatorService",
-    "get_director_service",
-    "DirectorService",
-    "get_crawler_service",
+    "get_creator_service",
     "CrawlerService",
+    "get_crawler_service",
 ]

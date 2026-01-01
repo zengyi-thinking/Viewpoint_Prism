@@ -1,12 +1,21 @@
-"""Director Service - AI Video Director with Dynamic Audio Narrative."""
+"""
+Director Service - AI Video Director with Dynamic Audio Narrative
+Phase 10: AI Director Expansion
+
+Features:
+1. Smart Audio Mixing: Auto-detect when to keep original audio vs AI narration
+2. Multi-Persona: Support different narrator personalities (Hajimi, Wukong, Pro)
+3. Material-Based: All visuals strictly based on uploaded sources
+"""
+
 import asyncio
 import uuid
 import subprocess
+from pathlib import Path
+from typing import Dict, Any, Optional, List
 import logging
 import json
 import re
-from pathlib import Path
-from typing import Dict, Any, Optional, List
 
 from app.core import get_settings
 from app.services.vector_store import get_vector_store
@@ -14,6 +23,7 @@ from app.services.vector_store import get_vector_store
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+# Directory for generated content
 GENERATED_DIR = Path(settings.upload_dir).parent / "generated"
 GENERATED_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -74,6 +84,7 @@ class DirectorService:
     """AI Director Service for dynamic audio narrative video generation."""
 
     def __init__(self):
+        """Initialize with API settings."""
         self.api_key = settings.modelscope_api_key
         self._tasks: Dict[str, Dict[str, Any]] = {}
 
@@ -84,12 +95,23 @@ class DirectorService:
         asr_data_a: List[Dict[str, Any]] = None,
         asr_data_b: List[Dict[str, Any]] = None,
     ) -> List[SequenceSegment]:
-        """Generate a narrative script with the Director's brain."""
+        """
+        Generate a narrative script with the Director's brain.
+
+        Args:
+            conflict_data: Conflict info with viewpoints
+            persona: Persona key ('hajimi', 'wukong', 'pro')
+            asr_data_a: ASR data from source A
+            asr_data_b: ASR data from source B
+
+        Returns:
+            List of SequenceSegment objects representing the video sequence
+        """
         persona_config = PERSONA_CONFIGS.get(persona, PERSONA_CONFIGS["pro"])
         view_a = conflict_data.get("viewpoint_a", {})
         view_b = conflict_data.get("viewpoint_b", {})
 
-        # Format ASR context
+        # Format ASR context (limit to avoid token overflow)
         asr_context_a = self._format_asr_context(asr_data_a, "A", max_items=10)
         asr_context_b = self._format_asr_context(asr_data_b, "B", max_items=10)
 
@@ -121,7 +143,15 @@ class DirectorService:
 - subtitle: 画面底部显示的字幕内容(精简版，10-20字)
 - rationale: 导演备注，为什么选这段(内部参考)
 
-请直接输出 JSON:"
+## 重要规则
+1. 开场(intro)使用 voiceover 介绍冲突
+2. 精彩片段(如激烈对话、名场面)使用 original 保留原声
+3. 转场和点评使用 voiceover 添加解说
+4. 结尾(outro)使用 voiceover 总结
+5. 解说词必须严格符合当前人设风格
+6. 只输出 JSON 数组，不要其他内容
+
+请直接输出 JSON:"""
 
         try:
             from openai import OpenAI
@@ -142,11 +172,15 @@ class DirectorService:
             )
 
             content = response.choices[0].message.content.strip()
+            logger.info(f"Director script raw output: {content[:500]}...")
+
+            # Parse JSON from response
             sequence = self._parse_sequence_json(content, persona_config)
             return sequence
 
         except Exception as e:
             logger.error(f"Director script generation error: {e}")
+            # Return fallback sequence
             return self._create_fallback_sequence(conflict_data, persona_config)
 
     def _format_asr_context(
@@ -176,8 +210,10 @@ class DirectorService:
         persona_config: Dict[str, Any]
     ) -> List[SequenceSegment]:
         """Parse JSON sequence from LLM response."""
-        json_match = re.search(r'[[\s\S]*\]', content)
+        # Try to extract JSON array from response
+        json_match = re.search(r'\[[\s\S]*\]', content)
         if not json_match:
+            logger.warning("No JSON array found in response")
             return []
 
         try:
@@ -185,7 +221,7 @@ class DirectorService:
             segments = []
 
             for item in data:
-                segments.append(SequenceSegment(
+                segment = SequenceSegment(
                     source=item.get("source", "A"),
                     start_hint=float(item.get("start_hint", 0)),
                     duration=float(item.get("duration", 8)),
@@ -193,8 +229,10 @@ class DirectorService:
                     narration=item.get("narration", ""),
                     subtitle=item.get("subtitle", ""),
                     rationale=item.get("rationale", ""),
-                ))
+                )
+                segments.append(segment)
 
+            logger.info(f"Parsed {len(segments)} segments from director script")
             return segments
 
         except json.JSONDecodeError as e:
@@ -209,7 +247,9 @@ class DirectorService:
         """Create fallback sequence when LLM fails."""
         view_a = conflict_data.get("viewpoint_a", {})
         view_b = conflict_data.get("viewpoint_b", {})
+        persona_name = persona_config.get("name", "解说员")
 
+        # Adjust narration style based on persona
         intro_narration = ""
         outro_narration = ""
 
@@ -224,10 +264,60 @@ class DirectorService:
             outro_narration = f"以上就是本期的对比分析。两种观点各有道理，关键在于具体场景的适用性。感谢观看。"
 
         return [
-            SequenceSegment("intro", 0, 8, "voiceover", intro_narration, "观点对决开始", "开场介绍冲突背景"),
-            SequenceSegment("A", view_a.get("timestamp", 5) or 5, 10, "original", "", view_a.get("title", "红方观点"), "展示红方核心观点原声"),
-            SequenceSegment("B", view_b.get("timestamp", 10) or 10, 10, "original", "", view_b.get("title", "蓝方观点"), "展示蓝方核心观点原声"),
-            SequenceSegment("outro", 0, 8, "voiceover", outro_narration, "感谢观看", "总结收尾"),
+            SequenceSegment(
+                source="intro",
+                start_hint=0,
+                duration=8,
+                audio_mode="voiceover",
+                narration=intro_narration,
+                subtitle="观点对决开始",
+                rationale="开场介绍冲突背景",
+            ),
+            SequenceSegment(
+                source="A",
+                start_hint=conflict_data.get("viewpoint_a", {}).get("timestamp", 5) or 5,
+                duration=10,
+                audio_mode="original",
+                narration="",
+                subtitle=view_a.get("title", "红方观点"),
+                rationale="展示红方核心观点原声",
+            ),
+            SequenceSegment(
+                source="A",
+                start_hint=(conflict_data.get("viewpoint_a", {}).get("timestamp", 5) or 5) + 15,
+                duration=8,
+                audio_mode="voiceover",
+                narration=f"红方的核心论点是{view_a.get('description', '...')[:30]}",
+                subtitle="红方论据分析",
+                rationale="解说红方论据",
+            ),
+            SequenceSegment(
+                source="B",
+                start_hint=conflict_data.get("viewpoint_b", {}).get("timestamp", 10) or 10,
+                duration=10,
+                audio_mode="original",
+                narration="",
+                subtitle=view_b.get("title", "蓝方观点"),
+                rationale="展示蓝方核心观点原声",
+            ),
+            SequenceSegment(
+                source="B",
+                start_hint=(conflict_data.get("viewpoint_b", {}).get("timestamp", 10) or 10) + 15,
+                duration=8,
+                audio_mode="voiceover",
+                narration=f"蓝方的核心论点是{view_b.get('description', '...')[:30]}",
+                subtitle="蓝方论据分析",
+                rationale="解说蓝方论据",
+            ),
+            SequenceSegment(
+                source="outro",
+                start_hint=0,
+                duration=8,
+                audio_mode="voiceover",
+                narration=outro_narration,
+                subtitle="感谢观看",
+                rationale="总结收尾",
+            ),
         ]
 
     async def generate_persona_speech(
@@ -236,17 +326,31 @@ class DirectorService:
         persona: str,
         output_path: Path,
     ) -> bool:
-        """Generate TTS speech with persona-specific voice settings."""
+        """
+        Generate TTS speech with persona-specific voice settings.
+
+        Args:
+            text: Narration text
+            persona: Persona key
+            output_path: Output MP3 path
+
+        Returns:
+            True if successful
+        """
         persona_config = PERSONA_CONFIGS.get(persona, PERSONA_CONFIGS["pro"])
 
         try:
             import edge_tts
 
+            voice = persona_config["voice"]
+            rate = persona_config["rate"]
+            pitch = persona_config["pitch"]
+
             communicate = edge_tts.Communicate(
                 text,
-                persona_config["voice"],
-                rate=persona_config["rate"],
-                pitch=persona_config["pitch"],
+                voice,
+                rate=rate,
+                pitch=pitch,
             )
             await communicate.save(str(output_path))
 
@@ -255,7 +359,23 @@ class DirectorService:
 
         except Exception as e:
             logger.error(f"Persona TTS error ({persona}): {e}")
-            return False
+
+            # Fallback: generate silent audio
+            try:
+                duration = max(3, len(text) / 5)  # Estimate duration
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-f", "lavfi",
+                    "-i", f"anullsrc=r=44100:cl=stereo",
+                    "-t", str(duration),
+                    "-c:a", "libmp3lame",
+                    "-q:a", "4",
+                    str(output_path)
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                return result.returncode == 0
+            except Exception:
+                return False
 
     async def compose_director_cut(
         self,
@@ -265,10 +385,23 @@ class DirectorService:
         voiceover_paths: Dict[int, Path],
         output_path: Path,
     ) -> bool:
-        """Compose director cut video with dynamic audio mixing."""
+        """
+        Compose director cut video with dynamic audio mixing.
+
+        Args:
+            sequence: List of SequenceSegment objects
+            source_a_path: Path to video A
+            source_b_path: Path to video B
+            voiceover_paths: Dict mapping segment index to voiceover MP3 path
+            output_path: Output video path
+
+        Returns:
+            True if successful
+        """
         try:
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
+            # Create temp directory
             temp_dir = GENERATED_DIR / f"temp_director_{uuid.uuid4().hex[:8]}"
             temp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -277,19 +410,23 @@ class DirectorService:
             for i, segment in enumerate(sequence):
                 logger.info(f"Processing segment {i+1}/{len(sequence)}: {segment.source} @ {segment.start_hint}s")
 
+                # Determine source video
                 if segment.source in ("intro", "outro"):
+                    # Use source A for intro/outro with voiceover
                     source_path = source_a_path
                     start_time = 0 if segment.source == "intro" else max(0, segment.start_hint)
                 elif segment.source == "A":
                     source_path = source_a_path
                     start_time = segment.exact_start
-                else:
+                else:  # B
                     source_path = source_b_path
                     start_time = segment.exact_start
 
                 clip_output = temp_dir / f"clip_{i:03d}.mp4"
 
+                # Build FFmpeg command based on audio_mode
                 if segment.audio_mode == "original":
+                    # Keep original audio at full volume
                     success = await self._process_original_segment(
                         source_path=source_path,
                         start_time=start_time,
@@ -297,7 +434,8 @@ class DirectorService:
                         subtitle=segment.subtitle,
                         output_path=clip_output,
                     )
-                else:
+                else:  # voiceover
+                    # Duck original audio and mix with TTS
                     voiceover_path = voiceover_paths.get(i)
                     success = await self._process_voiceover_segment(
                         source_path=source_path,
@@ -310,20 +448,23 @@ class DirectorService:
 
                 if success and clip_output.exists():
                     processed_clips.append(str(clip_output))
+                else:
+                    logger.warning(f"Segment {i} processing failed, skipping")
 
             if not processed_clips:
                 logger.error("No clips were processed successfully")
+                self._cleanup_temp_dir(temp_dir)
                 return False
 
-            final_success = await self._concatenate_clips(
+            # Concatenate all clips with crossfade
+            final_success = await self._concatenate_with_transition(
                 clips=processed_clips,
                 output_path=output_path,
                 temp_dir=temp_dir,
             )
 
             # Cleanup
-            import shutil
-            shutil.rmtree(temp_dir, ignore_errors=True)
+            self._cleanup_temp_dir(temp_dir)
 
             return final_success
 
@@ -341,8 +482,10 @@ class DirectorService:
     ) -> bool:
         """Process segment keeping original audio."""
         try:
+            # Escape subtitle for FFmpeg drawtext
             safe_subtitle = self._escape_ffmpeg_text(subtitle)
 
+            # Build filter: scale to 1280x720, add subtitle overlay
             filter_complex = (
                 f"scale=1280:720:force_original_aspect_ratio=decrease,"
                 f"pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,"
@@ -367,7 +510,12 @@ class DirectorService:
             ]
 
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-            return result.returncode == 0
+
+            if result.returncode != 0:
+                logger.error(f"Original segment error: {result.stderr[-500:]}")
+                return False
+
+            return True
 
         except Exception as e:
             logger.error(f"Original segment processing error: {e}")
@@ -386,6 +534,7 @@ class DirectorService:
         try:
             safe_subtitle = self._escape_ffmpeg_text(subtitle)
 
+            # Video filter
             video_filter = (
                 f"scale=1280:720:force_original_aspect_ratio=decrease,"
                 f"pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,"
@@ -396,6 +545,7 @@ class DirectorService:
             )
 
             if voiceover_path and voiceover_path.exists():
+                # Mix ducked original audio with voiceover
                 audio_filter = (
                     f"[0:a]atrim=start={start_time}:duration={duration},asetpts=PTS-STARTPTS,volume=0.1[bg];"
                     f"[1:a]volume=1.5[vo];"
@@ -415,9 +565,11 @@ class DirectorService:
                     "-crf", "23",
                     "-c:a", "aac",
                     "-b:a", "128k",
+                    "-t", str(duration),
                     str(output_path)
                 ]
             else:
+                # No voiceover available, just duck original audio
                 cmd = [
                     "ffmpeg", "-y",
                     "-ss", str(start_time),
@@ -434,26 +586,33 @@ class DirectorService:
                 ]
 
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-            return result.returncode == 0
+
+            if result.returncode != 0:
+                logger.error(f"Voiceover segment error: {result.stderr[-500:]}")
+                return False
+
+            return True
 
         except Exception as e:
             logger.error(f"Voiceover segment processing error: {e}")
             return False
 
-    async def _concatenate_clips(
+    async def _concatenate_with_transition(
         self,
         clips: List[str],
         output_path: Path,
         temp_dir: Path,
     ) -> bool:
-        """Concatenate clips."""
+        """Concatenate clips with simple fade transitions."""
         try:
+            # Create concat file
             concat_file = temp_dir / "concat.txt"
             with open(concat_file, "w", encoding="utf-8") as f:
                 for clip_path in clips:
                     abs_path = str(Path(clip_path).absolute()).replace(chr(92), '/')
                     f.write(f"file '{abs_path}'\n")
 
+            # Simple concat (xfade is complex and may fail)
             cmd = [
                 "ffmpeg", "-y",
                 "-f", "concat",
@@ -464,7 +623,13 @@ class DirectorService:
             ]
 
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            return result.returncode == 0
+
+            if result.returncode != 0:
+                logger.error(f"Concatenation error: {result.stderr[-500:]}")
+                return False
+
+            logger.info(f"Director cut video created: {output_path}")
+            return True
 
         except Exception as e:
             logger.error(f"Concatenation error: {e}")
@@ -474,18 +639,28 @@ class DirectorService:
         """Escape special characters for FFmpeg drawtext filter."""
         if not text:
             return ""
+        # Escape special chars: \ ' :
         text = text.replace("\\", "\\\\")
         text = text.replace("'", "\\'")
         text = text.replace(":", "\\:")
         text = text.replace("%", "\\%")
         return text
 
+    def _cleanup_temp_dir(self, temp_dir: Path):
+        """Clean up temporary directory."""
+        try:
+            import shutil
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
+        except Exception as e:
+            logger.warning(f"Failed to cleanup temp dir: {e}")
+
     async def get_asr_data(self, source_id: str) -> List[Dict[str, Any]]:
         """Get ASR data for a source from vector store."""
         try:
             vector_store = get_vector_store()
             results = vector_store.search(
-                query="",
+                query="",  # Empty query to get all
                 n_results=50,
                 filter_dict={"source_id": source_id, "chunk_type": "asr"},
             )
@@ -499,6 +674,7 @@ class DirectorService:
                     "text": result.get("document", ""),
                 })
 
+            # Sort by start time
             asr_data.sort(key=lambda x: x["start"])
             return asr_data
 
@@ -518,7 +694,23 @@ class DirectorService:
         time_b: float,
         persona: str = "pro",
     ) -> Dict[str, Any]:
-        """Full pipeline to create a director cut video."""
+        """
+        Full pipeline to create a director cut video.
+
+        Args:
+            task_id: Unique task identifier
+            conflict_data: Conflict info for script generation
+            source_a_id: ID of source A
+            source_a_path: Path to video A
+            time_a: Timestamp for video A
+            source_b_id: ID of source B
+            source_b_path: Path to video B
+            time_b: Timestamp for video B
+            persona: Persona key ('hajimi', 'wukong', 'pro')
+
+        Returns:
+            Task result with video URL or error
+        """
         persona_config = PERSONA_CONFIGS.get(persona, PERSONA_CONFIGS["pro"])
 
         try:
@@ -529,9 +721,11 @@ class DirectorService:
                 "message": f"🎬 {persona_config['emoji']} 导演正在编写剧本...",
             }
 
+            # Get ASR data for context
             asr_data_a = await self.get_asr_data(source_a_id)
             asr_data_b = await self.get_asr_data(source_b_id)
 
+            # Update conflict_data with timestamps
             conflict_data["viewpoint_a"]["timestamp"] = time_a
             conflict_data["viewpoint_b"]["timestamp"] = time_b
 
@@ -545,7 +739,7 @@ class DirectorService:
             if not sequence:
                 raise Exception("剧本生成失败")
 
-            # Step 2: Generate voiceovers
+            # Step 2: Generate voiceovers for voiceover segments
             self._tasks[task_id] = {
                 "status": "generating_voiceover",
                 "progress": 30,
@@ -567,7 +761,7 @@ class DirectorService:
                     if success:
                         voiceover_paths[i] = vo_path
 
-            # Step 3: Compose video
+            # Step 3: Compose director cut video
             self._tasks[task_id] = {
                 "status": "composing_video",
                 "progress": 50,
@@ -584,14 +778,15 @@ class DirectorService:
             )
 
             # Cleanup voiceover files
-            import shutil
-            shutil.rmtree(voiceover_dir, ignore_errors=True)
+            self._cleanup_temp_dir(voiceover_dir)
 
             if not compose_success:
                 raise Exception("视频合成失败")
 
+            # Success
             video_url = f"/static/generated/director_{task_id}.mp4"
 
+            # Build script summary
             script_summary = " → ".join([
                 f"{s.source}({'🔊' if s.audio_mode == 'original' else '🎤'})"
                 for s in sequence
@@ -608,6 +803,7 @@ class DirectorService:
                 "segment_count": len(sequence),
             }
 
+            logger.info(f"Director cut video created: {video_url}")
             return self._tasks[task_id]
 
         except Exception as e:
@@ -621,9 +817,11 @@ class DirectorService:
             return self._tasks[task_id]
 
     def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """Get status of a director cut task."""
         return self._tasks.get(task_id)
 
     def create_task(self) -> str:
+        """Create a new task and return its ID."""
         task_id = str(uuid.uuid4())[:8]
         self._tasks[task_id] = {
             "status": "pending",
@@ -633,11 +831,12 @@ class DirectorService:
         return task_id
 
 
-# Singleton
-_director_service = None
+# Singleton instance
+_director_service: Optional[DirectorService] = None
 
 
 def get_director_service() -> DirectorService:
+    """Get or create DirectorService singleton."""
     global _director_service
     if _director_service is None:
         _director_service = DirectorService()

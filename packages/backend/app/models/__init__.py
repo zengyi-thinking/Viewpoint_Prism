@@ -1,11 +1,9 @@
-"""Models module initialization."""
 from app.models.models import (
     Source,
     SourceStatus,
     Evidence,
     AnalysisResult,
     ChatMessage,
-    Base
 )
 
 __all__ = [
@@ -14,5 +12,4 @@ __all__ = [
     "Evidence",
     "AnalysisResult",
     "ChatMessage",
-    "Base"
 ]

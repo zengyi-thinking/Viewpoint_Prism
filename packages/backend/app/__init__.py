@@ -1,1 +1,1 @@
-"""Application package initialization."""
+# Viewpoint Prism Backend

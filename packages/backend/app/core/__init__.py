@@ -1,5 +1,5 @@
-"""Core module initialization."""
+# Core module exports
 from app.core.config import get_settings, Settings
-from app.core.database import init_db, get_db
+from app.core.database import get_db, init_db, Base, async_session
 
-__all__ = ["get_settings", "Settings", "init_db", "get_db"]
+__all__ = ["get_settings", "Settings", "get_db", "init_db", "Base", "async_session"]
