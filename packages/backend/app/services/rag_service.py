@@ -1,36 +1,26 @@
 """
 RAG (Retrieval-Augmented Generation) Service
-Handles chat with video content using vector search and LLM generation.
+Handles chat with video content using vector search and SophNet LLM.
 """
 
-import re
 import json
 import logging
 from typing import List, Dict, Any, Optional, Generator
-from openai import OpenAI
 
-from app.core import get_settings
+from app.services.sophnet_service import get_sophnet_service
 from app.services.vector_store import get_vector_store
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 class RAGService:
-    """RAG-based chat service for video intelligence."""
+    """RAG-based chat service for video intelligence using SophNet."""
 
     def __init__(self):
-        """Initialize with ModelScope API client."""
-        # Use ModelScope inference endpoint with provided API key
-        self.client = OpenAI(
-            api_key=settings.modelscope_api_key,
-            base_url="https://api-inference.modelscope.cn/v1"
-        )
-        self.model = settings.modelscope_model
+        """Initialize with SophNet service."""
+        self.sophnet = get_sophnet_service()
         self.vector_store = get_vector_store()
-
-        if not settings.modelscope_api_key:
-            logger.warning("ModelScope API key not configured!")
+        self.model = "DeepSeek-V3.2"
 
     def _format_timestamp(self, seconds: float) -> str:
         """Convert seconds to MM:SS format."""
@@ -102,7 +92,7 @@ class RAGService:
         self,
         query: str,
         source_ids: Optional[List[str]] = None,
-        n_results: int = 15  # Increased from 10 for better recall
+        n_results: int = 15
     ) -> Dict[str, Any]:
         """
         Chat with video content using RAG.
@@ -115,13 +105,6 @@ class RAGService:
         Returns:
             Dict with response content and references
         """
-        if not settings.modelscope_api_key:
-            return {
-                "content": "抱歉，AI 服务未配置。请在 .env 中设置 MODELSCOPE_API_KEY。",
-                "references": [],
-                "context_used": []
-            }
-
         try:
             # Step 1: Check if vector store has any data
             total_docs = self.vector_store.collection.count()
@@ -149,8 +132,7 @@ class RAGService:
                     distance = r.get("distance", 0)
                     logger.info(f"  [{i+1}] distance={distance:.3f}, source_id={metadata.get('source_id', 'unknown')[:8]}..., type={metadata.get('type', 'unknown')}, text_preview={r.get('text', '')[:50]}...")
             else:
-                # Log warning for debugging
-                logger.warning(f"RAG: No results found for query='{query[:50]}...', source_ids={source_ids}, n_results={n_results}")
+                logger.warning(f"RAG: No results found for query='{query[:50]}...', source_ids={source_ids}")
 
             if not results:
                 # Check if the specific sources have data
@@ -183,25 +165,23 @@ class RAGService:
                 if sid and title:
                     source_titles[sid] = title
 
-            # Step 2: Build context
+            # Step 3: Build context
             context = self._build_context(results, source_titles)
 
-            # Step 3: Generate response
+            # Step 4: Generate response using SophNet DeepSeek
             messages = [
                 {"role": "system", "content": self._build_system_prompt()},
                 {"role": "user", "content": f"## 检索到的视频片段：\n{context}\n\n## 用户问题：\n{query}"}
             ]
 
-            response = self.client.chat.completions.create(
-                model=self.model,
+            content = await self.sophnet.chat(
                 messages=messages,
+                model=self.model,
                 temperature=0.7,
                 max_tokens=1500,
             )
 
-            content = response.choices[0].message.content
-
-            # Step 4: Extract references from context
+            # Step 5: Extract references from context
             references = []
             for r in results[:5]:  # Top 5 as references
                 metadata = r.get("metadata", {})
@@ -229,14 +209,16 @@ class RAGService:
                 "context_used": []
             }
 
-    def chat_with_video_stream(
+    async def chat_with_video_stream(
         self,
         query: str,
         source_ids: Optional[List[str]] = None,
-        n_results: int = 15  # Increased from 10 for better recall
+        n_results: int = 15
     ) -> Generator[str, None, None]:
         """
         Stream chat response with video content.
+
+        Note: SophNet doesn't support streaming yet, so this yields the complete response.
 
         Args:
             query: User's question
@@ -244,12 +226,8 @@ class RAGService:
             n_results: Number of search results to retrieve
 
         Yields:
-            Response chunks as they are generated
+            Response chunks as SSE format
         """
-        if not settings.modelscope_api_key:
-            yield "data: " + json.dumps({"content": "抱歉，AI 服务未配置。", "done": True}) + "\n\n"
-            return
-
         try:
             # Step 1: Retrieve relevant documents
             logger.info(f"RAG Stream Query: {query}")
@@ -292,26 +270,25 @@ class RAGService:
 
             yield "data: " + json.dumps({"references": references}) + "\n\n"
 
-            # Step 2: Stream generate response
+            # Step 2: Generate response (non-streaming for now)
             messages = [
                 {"role": "system", "content": self._build_system_prompt()},
                 {"role": "user", "content": f"## 检索到的视频片段：\n{context}\n\n## 用户问题：\n{query}"}
             ]
 
-            stream = self.client.chat.completions.create(
-                model=self.model,
+            content = await self.sophnet.chat(
                 messages=messages,
+                model=self.model,
                 temperature=0.7,
                 max_tokens=1500,
-                stream=True
             )
 
-            for chunk in stream:
-                if chunk.choices[0].delta.content:
-                    yield "data: " + json.dumps({
-                        "content": chunk.choices[0].delta.content,
-                        "done": False
-                    }) + "\n\n"
+            # Yield the complete response as chunks to simulate streaming
+            for char in content:
+                yield "data: " + json.dumps({
+                    "content": char,
+                    "done": False
+                }) + "\n\n"
 
             yield "data: " + json.dumps({"content": "", "done": True}) + "\n\n"
 

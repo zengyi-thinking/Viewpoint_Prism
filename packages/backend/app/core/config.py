@@ -23,10 +23,18 @@ class Settings(BaseSettings):
     # ChromaDB
     chroma_db_dir: str = "data/chromadb"
 
-    # DashScope API (Alibaba Cloud - Qwen-VL & Paraformer)
+    # ========== SophNet AI Services ==========
+    # Primary AI service provider - supports LLM, VLM, TTS, Image, Embedding
+    sophnet_api_key: str = "pA3uYXtPw3vV3sb3khjGTe8D5Jbi7Bm1Ohk6rGSyXParemqqszyOG5v5-onI62EkR1q-9pqjCgSC-3jQUoiETg"
+    sophnet_project_id: str = "5U57ROU7TqfeNINZnKzYZ5"
+    sophnet_tts_easyllm_id: str = "7RUpfZakZM7tIygXY5AGgA"
+    sophnet_embedding_easyllm_id: str = "6yXUAJl2jrJJLtgiKPq8vH"
+
+    # ========== Legacy AI Services (for backward compatibility) ==========
+    # DashScope API (Alibaba Cloud - Qwen-VL & Paraformer) - DEPRECATED
     dashscope_api_key: str = ""
 
-    # ModelScope API (for LLM inference)
+    # ModelScope API (for LLM inference) - DEPRECATED
     modelscope_api_key: str = ""
     modelscope_model: str = "Qwen/Qwen2.5-Coder-32B-Instruct"
 

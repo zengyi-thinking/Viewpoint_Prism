@@ -6,6 +6,9 @@ from .rag_service import RAGService, get_rag_service
 from .analysis_service import AnalysisService, get_analysis_service
 from .creator import CreatorService, get_creator_service
 from .crawler import CrawlerService, get_crawler_service
+from .director import DirectorService, get_director_service
+from .illustrator import IllustratorService, get_illustrator_service
+from .sophnet_service import SophNetService, get_sophnet_service
 
 __all__ = [
     "MediaProcessor",
@@ -22,4 +25,10 @@ __all__ = [
     "get_creator_service",
     "CrawlerService",
     "get_crawler_service",
+    "DirectorService",
+    "get_director_service",
+    "IllustratorService",
+    "get_illustrator_service",
+    "SophNetService",
+    "get_sophnet_service",
 ]

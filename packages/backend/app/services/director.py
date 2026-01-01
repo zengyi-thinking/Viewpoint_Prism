@@ -6,6 +6,8 @@ Features:
 1. Smart Audio Mixing: Auto-detect when to keep original audio vs AI narration
 2. Multi-Persona: Support different narrator personalities (Hajimi, Wukong, Pro)
 3. Material-Based: All visuals strictly based on uploaded sources
+
+AI Provider: SophNet (DeepSeek-V3.2 for LLM, CosyVoice for TTS)
 """
 
 import asyncio
@@ -18,6 +20,7 @@ import json
 import re
 
 from app.core import get_settings
+from app.services.sophnet_service import get_sophnet_service
 from app.services.vector_store import get_vector_store
 
 logger = logging.getLogger(__name__)
@@ -27,30 +30,30 @@ settings = get_settings()
 GENERATED_DIR = Path(settings.upload_dir).parent / "generated"
 GENERATED_DIR.mkdir(parents=True, exist_ok=True)
 
-# Persona configurations
+# Persona configurations (SophNet CosyVoice voice names)
 PERSONA_CONFIGS = {
     "hajimi": {
         "name": "哈基米",
         "description": "你是一只可爱的猫娘解说，喜欢用'喵~'结尾，语气活泼激萌，称呼观众为'铲屎官们'。",
-        "voice": "zh-CN-XiaoxiaoNeural",
-        "rate": "+25%",
-        "pitch": "+15Hz",
+        "voice": "longxiaochun",  # CosyVoice voice name
+        "rate": 1.2,
+        "pitch": 1.1,
         "emoji": "🐱",
     },
     "wukong": {
         "name": "大圣",
         "description": "你是齐天大圣孙悟空，喜欢用'俺老孙'自称，语气狂傲不羁，火眼金睛，充满战斗气息。",
-        "voice": "zh-CN-YunxiNeural",
-        "rate": "+10%",
-        "pitch": "-5Hz",
+        "voice": "longxiaochun",
+        "rate": 1.1,
+        "pitch": 0.9,
         "emoji": "🐵",
     },
     "pro": {
         "name": "专业解说",
         "description": "你是专业的电竞/剧情分析师，语气冷静客观，注重数据和逻辑，用词精准专业。",
-        "voice": "zh-CN-YunyangNeural",
-        "rate": "+0%",
-        "pitch": "+0Hz",
+        "voice": "longxiaochun",
+        "rate": 1.0,
+        "pitch": 1.0,
         "emoji": "🎙️",
     },
 }
@@ -81,11 +84,11 @@ class SequenceSegment:
 
 
 class DirectorService:
-    """AI Director Service for dynamic audio narrative video generation."""
+    """AI Director Service for dynamic audio narrative video generation using SophNet."""
 
     def __init__(self):
-        """Initialize with API settings."""
-        self.api_key = settings.modelscope_api_key
+        """Initialize with SophNet services."""
+        self.sophnet = get_sophnet_service()
         self._tasks: Dict[str, Dict[str, Any]] = {}
 
     async def generate_narrative_script(
@@ -154,24 +157,19 @@ class DirectorService:
 请直接输出 JSON:"""
 
         try:
-            from openai import OpenAI
+            # Use SophNet DeepSeek-V3.2 for script generation
+            messages = [
+                {"role": "system", "content": f"你是一个专业的视频导演AI。{persona_config['description']}"},
+                {"role": "user", "content": prompt}
+            ]
 
-            client = OpenAI(
-                api_key=self.api_key,
-                base_url="https://api-inference.modelscope.cn/v1",
-            )
-
-            response = client.chat.completions.create(
-                model="Qwen/Qwen2.5-72B-Instruct",
-                messages=[
-                    {"role": "system", "content": f"你是一个专业的视频导演AI。{persona_config['description']}"},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=2000,
+            content = await self.sophnet.chat(
+                messages=messages,
+                model="DeepSeek-V3.2",
                 temperature=0.7,
+                max_tokens=2000,
             )
 
-            content = response.choices[0].message.content.strip()
             logger.info(f"Director script raw output: {content[:500]}...")
 
             # Parse JSON from response
@@ -327,7 +325,7 @@ class DirectorService:
         output_path: Path,
     ) -> bool:
         """
-        Generate TTS speech with persona-specific voice settings.
+        Generate TTS speech with persona-specific voice settings using SophNet CosyVoice.
 
         Args:
             text: Narration text
@@ -340,19 +338,18 @@ class DirectorService:
         persona_config = PERSONA_CONFIGS.get(persona, PERSONA_CONFIGS["pro"])
 
         try:
-            import edge_tts
-
-            voice = persona_config["voice"]
-            rate = persona_config["rate"]
-            pitch = persona_config["pitch"]
-
-            communicate = edge_tts.Communicate(
-                text,
-                voice,
-                rate=rate,
-                pitch=pitch,
+            # Use SophNet CosyVoice for TTS
+            audio_data = await self.sophnet.generate_speech(
+                text=text,
+                voice=persona_config["voice"],
+                speech_rate=persona_config["rate"],
+                pitch_rate=persona_config["pitch"],
             )
-            await communicate.save(str(output_path))
+
+            # Write audio data to file
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_path, "wb") as f:
+                f.write(audio_data)
 
             logger.info(f"Persona speech generated ({persona}): {output_path}")
             return True
