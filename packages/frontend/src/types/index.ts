@@ -173,6 +173,23 @@ export interface PersonaConfig {
   description: string
 }
 
+// Phase 11: Storyboard frame types
+export interface StoryboardFrame {
+  frame_number: number
+  image_url: string
+  image_path: string
+  narration: string
+  prompt_used?: string
+}
+
+export interface MangaPanel {
+  image_url: string
+  image_path: string
+  scene_description: string
+  mood: string
+  prompt_used?: string
+}
+
 export interface DirectorTask {
   task_id: string
   status: 'pending' | 'generating_script' | 'generating_voiceover' | 'composing_video' | 'completed' | 'error'
@@ -184,6 +201,9 @@ export interface DirectorTask {
   persona_name?: string
   segment_count?: number
   error?: string
+  // Phase 11: Visual content
+  storyboard_frames?: StoryboardFrame[]
+  cover_image?: string
 }
 
 // Phase 11: Network Search types

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useAppStore } from '@/stores/app-store'
-import { Zap, GitBranch, Clock, AlertTriangle, Sparkles, RefreshCw, Loader2, Film, Download, Play, Pause, X, Video, BookOpen, Swords, Footprints, Check, Clapperboard, ArrowLeft, FileText, Network, Scissors } from 'lucide-react'
+import { Zap, GitBranch, Clock, AlertTriangle, Sparkles, RefreshCw, Loader2, Film, Download, Play, Pause, X, Video, BookOpen, Swords, Footprints, Check, Clapperboard, ArrowLeft, FileText, Network, Scissors, Image, Expand, Grid3X3 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import * as echarts from 'echarts'
-import type { AnalysisTab, Conflict, DebateTask, GraphNode, DirectorTask, Persona } from '@/types'
+import type { AnalysisTab, Conflict, DebateTask, GraphNode, DirectorTask, Persona, StoryboardFrame } from '@/types'
 import { FeatureCard } from '@/components/ui/FeatureCard'
 
 // Persona configurations for UI
@@ -475,7 +475,7 @@ function ConflictCard({
             )}
 
             {/* Completed: Mini Player */}
-            {directorTask?.status === 'completed' && directorTask.video_url && (
+            {directorTask?.status === 'completed' && (
               <div className="space-y-3">
                 {/* Director Info */}
                 <div className="flex items-center gap-2 text-xs text-blue-300">
@@ -494,37 +494,91 @@ function ConflictCard({
                   </div>
                 )}
 
-                {/* Mini Video Player */}
-                <div className="relative rounded-xl overflow-hidden bg-black aspect-video group/player">
-                  <video
-                    ref={directorVideoRef}
-                    src={`http://localhost:8000${directorTask.video_url}`}
-                    className="w-full h-full object-contain"
-                    onEnded={() => setIsDirectorVideoPlaying(false)}
-                  />
-                  <div
-                    onClick={toggleDirectorVideo}
-                    className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover/player:opacity-100 transition-opacity cursor-pointer"
-                  >
-                    <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
-                      {isDirectorVideoPlaying ? (
-                        <Pause className="w-5 h-5 text-white" />
-                      ) : (
-                        <Play className="w-5 h-5 text-white ml-0.5" />
-                      )}
+                {/* Storyboard Frames - Phase 11 */}
+                {directorTask.storyboard_frames && directorTask.storyboard_frames.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-xs text-purple-300">
+                      <Grid3X3 className="w-3 h-3" />
+                      <span>分镜脚本 ({directorTask.storyboard_frames.length} 帧)</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {directorTask.storyboard_frames.map((frame) => (
+                        <div
+                          key={frame.frame_number}
+                          className="relative group/frame rounded-lg overflow-hidden bg-zinc-900 border border-zinc-800 aspect-video"
+                        >
+                          <img
+                            src={`http://localhost:8000${frame.image_url}`}
+                            alt={`Frame ${frame.frame_number}`}
+                            className="w-full h-full object-cover transition-transform group-hover/frame:scale-105"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+                          <div className="absolute bottom-0 left-0 right-0 p-2">
+                            <div className="flex items-center gap-1 text-[10px] text-white/80">
+                              <span className="bg-purple-500/30 px-1.5 py-0.5 rounded text-purple-300">
+                                #{frame.frame_number}
+                              </span>
+                              <span className="truncate">{frame.narration}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                </div>
+                )}
+
+                {/* Cover Image - Phase 11 */}
+                {directorTask.cover_image && !directorTask.video_url && (
+                  <div className="relative group/frame rounded-xl overflow-hidden bg-zinc-900 border border-zinc-800 aspect-video">
+                    <img
+                      src={`http://localhost:8000${directorTask.cover_image}`}
+                      alt="Director cover"
+                      className="w-full h-full object-cover transition-transform group-hover/frame:scale-105"
+                    />
+                    <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                      <div className="text-center">
+                        <Image className="w-8 h-8 text-white/80 mx-auto mb-2" />
+                        <p className="text-sm text-white/80">{directorTask.persona_name} 导演封面</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Mini Video Player */}
+                {directorTask.video_url && (
+                  <div className="relative rounded-xl overflow-hidden bg-black aspect-video group/player">
+                    <video
+                      ref={directorVideoRef}
+                      src={`http://localhost:8000${directorTask.video_url}`}
+                      className="w-full h-full object-contain"
+                      onEnded={() => setIsDirectorVideoPlaying(false)}
+                    />
+                    <div
+                      onClick={toggleDirectorVideo}
+                      className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover/player:opacity-100 transition-opacity cursor-pointer"
+                    >
+                      <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                        {isDirectorVideoPlaying ? (
+                          <Pause className="w-5 h-5 text-white" />
+                        ) : (
+                          <Play className="w-5 h-5 text-white ml-0.5" />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Action Buttons */}
                 <div className="flex gap-2">
-                  <button
-                    onClick={handleDirectorDownload}
-                    className="flex-1 py-2 px-4 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-sm text-zinc-300 flex items-center justify-center gap-2 transition-all"
-                  >
-                    <Download className="w-4 h-4" />
-                    {t[language].download}
-                  </button>
+                  {directorTask.video_url && (
+                    <button
+                      onClick={handleDirectorDownload}
+                      className="flex-1 py-2 px-4 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-sm text-zinc-300 flex items-center justify-center gap-2 transition-all"
+                    >
+                      <Download className="w-4 h-4" />
+                      {t[language].download}
+                    </button>
+                  )}
                   <button
                     className="flex-1 py-2 px-4 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 rounded-lg text-sm text-blue-300 flex items-center justify-center gap-2 transition-all"
                   >
