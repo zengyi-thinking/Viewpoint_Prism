@@ -304,7 +304,7 @@ class SophNetService:
     async def generate_image(
         self,
         prompt: str,
-        size: str = "1328*1328",
+        size: str = "1328*1328",  # Note: API only supports this size
         seed: Optional[int] = None,
         model: str = "qwen-image",
         max_polls: int = 30,
@@ -327,27 +327,31 @@ class SophNetService:
         if not self.api_key:
             raise ValueError("API key not configured")
 
-        # Step 1: Create the image generation task
-        create_url = f"{SOPHNET_API_BASE}/projects/easyllms/imagegenerator/task"
+        # Use asyncio.to_thread to run synchronous requests in async context
+        import asyncio
+        import requests
 
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
+        def _generate_image_sync():
+            # Step 1: Create the image generation task
+            create_url = f"{SOPHNET_API_BASE}/projects/easyllms/imagegenerator/task"
 
-        payload = {
-            "model": model,
-            "input": {"prompt": prompt},
-            "parameters": {"size": size},
-        }
-        if seed is not None:
-            payload["parameters"]["seed"] = seed
+            # Note: Only Authorization header is needed for task creation (as per working example)
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+            }
 
-        logger.info(f"Creating image generation task with prompt: {prompt[:50]}...")
+            payload = {
+                "model": model,
+                "input": {"prompt": prompt},
+                "parameters": {"size": size},
+            }
+            if seed is not None:
+                payload["parameters"]["seed"] = seed
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+            logger.info(f"Creating image generation task with prompt: {prompt[:50]}...")
+
             # Create task
-            create_resp = await client.post(create_url, headers=headers, json=payload)
+            create_resp = requests.post(create_url, headers=headers, json=payload, timeout=60.0)
 
             if create_resp.status_code != 200:
                 error_text = create_resp.text
@@ -368,11 +372,13 @@ class SophNetService:
             status_url = f"{create_url}/{task_id}"
 
             for poll_num in range(max_polls):
-                await asyncio.sleep(poll_interval)
+                import time
+                time.sleep(poll_interval)
 
-                status_resp = await client.get(
+                status_resp = requests.get(
                     status_url,
                     headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                    timeout=60.0
                 )
 
                 if status_resp.status_code != 200:
@@ -402,7 +408,7 @@ class SophNetService:
             if not image_url:
                 raise ValueError(f"No image URL in successful response: {output}")
 
-            download_resp = await client.get(image_url)
+            download_resp = requests.get(image_url, timeout=60.0)
             if download_resp.status_code != 200:
                 raise Exception(f"Failed to download image: {image_url}")
 
@@ -421,6 +427,9 @@ class SophNetService:
 
             logger.info(f"Generated image saved to: {output_path}")
             return str(output_path)
+
+        # Run synchronous function in thread pool
+        return await asyncio.to_thread(_generate_image_sync)
 
     # ========================================================================
     # Embedding (BGE-M3)

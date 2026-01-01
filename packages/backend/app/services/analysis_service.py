@@ -616,96 +616,119 @@ class AnalysisService:
 
     async def generate_executive_summary(
         self,
-        source_id: str,
+        source_ids: List[str],
         use_cache: bool = True
     ) -> Dict[str, Any]:
         """
-        Generate One-Pager Executive Summary for a video.
+        Generate One-Pager Executive Summary for multiple videos.
 
         This creates a magazine-style decision brief with:
         - Compelling headline (15 chars max)
         - TL;DR summary (50 chars max)
         - 3 key insights
         - AI-generated conceptual illustration
-        - Video screenshot evidence
+        - Video screenshot evidence from all selected sources
 
         Args:
-            source_id: Video source ID
+            source_ids: List of video source IDs
             use_cache: Whether to use cached results
 
         Returns:
             Dict with OnePagerData structure
         """
+        if not source_ids:
+            return {"message": "没有提供视频源"}
+
         # Check cache
-        cache_key = self._get_cache_key("one_pager", [source_id])
+        cache_key = self._get_cache_key("one_pager", source_ids)
         if use_cache and cache_key in self._cache:
-            logger.info(f"Returning cached one-pager for {source_id}")
+            logger.info(f"Returning cached one-pager for {source_ids}")
             return self._cache[cache_key]
 
         if not settings.sophnet_api_key:
             return {"message": "AI服务未配置"}
 
         try:
-            # Get source documents
-            docs = self.vector_store.get_source_documents(source_id)
-            if not docs:
+            # Get source documents from all videos
+            all_docs = []
+            video_titles = []
+            for source_id in source_ids:
+                docs = self.vector_store.get_source_documents(source_id)
+                if docs:
+                    video_title = docs[0].get("metadata", {}).get("video_title", source_id)
+                    video_titles.append(video_title)
+                    # Tag each doc with its source
+                    for doc in docs:
+                        doc["_source_id"] = source_id
+                        doc["_video_title"] = video_title
+                    all_docs.extend(docs)
+
+            if not all_docs:
                 return {"message": "没有找到视频内容数据"}
 
-            video_title = docs[0].get("metadata", {}).get("video_title", source_id)
+            # Sort by timestamp
+            all_docs.sort(key=lambda x: x.get("metadata", {}).get("start", 0))
 
-            # Build content summary for LLM
+            # Build content summary for LLM (from all sources)
             content_parts = []
-            docs.sort(key=lambda x: x.get("metadata", {}).get("start", 0))
-            for doc in docs[:50]:
+            for doc in all_docs[:80]:  # Increased limit for multiple videos
                 metadata = doc.get("metadata", {})
                 timestamp = self._format_timestamp(metadata.get("start", 0))
                 doc_type = metadata.get("type", "unknown")
                 text = doc.get("text", "")[:200]
+                video_title = doc.get("_video_title", "")
                 type_label = "画面" if doc_type == "visual" else "语音"
-                content_parts.append(f"[{timestamp}] {type_label}: {text}")
+                content_parts.append(f"[{video_title}][{timestamp}] {type_label}: {text}")
 
             content_summary = "\n".join(content_parts)
 
-            # Extract screenshot URLs from visual docs
+            # Extract screenshot URLs from visual docs (from ALL sources)
             screenshot_urls = []
-            for doc in docs:
+            screenshots_per_source = max(1, 4 // len(source_ids))  # Distribute across sources
+            source_screenshot_count = {sid: 0 for sid in source_ids}
+
+            for doc in all_docs:
                 metadata = doc.get("metadata", {})
                 if metadata.get("type") == "visual":
-                    # Check for frame_path in metadata
-                    frame_path = metadata.get("frame_path")
-                    if frame_path and len(screenshot_urls) < 2:
-                        # Convert absolute path to /static/ URL
-                        # Input: D:\DevProject\Viewpoint_Prism\packages\backend\data\temp\{id}\frames\frame_00001.jpg
-                        # Output: /static/temp/{id}/frames/frame_00001.jpg
-                        import re
-                        # Normalize path separators to forward slashes
-                        normalized_path = frame_path.replace("\\", "/")
-                        # Match path after data/temp or data/uploads (regardless of preceding directories)
-                        temp_match = re.search(r'(?:^|/)data/temp/(.+)$', normalized_path)
-                        uploads_match = re.search(r'(?:^|/)data/uploads/(.+)$', normalized_path)
+                    source_id = doc.get("_source_id")
+                    if source_id and source_screenshot_count.get(source_id, 0) < screenshots_per_source:
+                        frame_path = metadata.get("frame_path")
+                        if frame_path:
+                            # Convert absolute path to /static/ URL
+                            import re
+                            normalized_path = frame_path.replace("\\", "/")
+                            temp_match = re.search(r'(?:^|/)data/temp/(.+)$', normalized_path)
+                            uploads_match = re.search(r'(?:^|/)data/uploads/(.+)$', normalized_path)
 
-                        if temp_match:
-                            relative_path = temp_match.group(1)
-                            screenshot_urls.append(f"/static/temp/{relative_path}")
-                        elif uploads_match:
-                            relative_path = uploads_match.group(1)
-                            screenshot_urls.append(f"/static/uploads/{relative_path}")
-                    if len(screenshot_urls) >= 2:
-                        break
+                            url = None
+                            if temp_match:
+                                relative_path = temp_match.group(1)
+                                url = f"/static/temp/{relative_path}"
+                            elif uploads_match:
+                                relative_path = uploads_match.group(1)
+                                url = f"/static/uploads/{relative_path}"
+
+                            if url and url not in screenshot_urls:
+                                screenshot_urls.append(url)
+                                source_screenshot_count[source_id] = source_screenshot_count.get(source_id, 0) + 1
+
+                if len(screenshot_urls) >= 4:  # Max 4 screenshots total
+                    break
 
             # Generate text analysis with DeepSeek
-            prompt = f"""请为以下视频内容生成一份"一页纸决策简报"（Executive Summary）。
+            titles_str = " / ".join(video_titles[:3])
+            prompt = f"""请为以下多个视频内容生成一份"一页纸决策简报"（Executive Summary）。
 
-## 视频标题: {video_title}
-## 视频ID: {source_id}
+## 视频标题: {titles_str}
+## 视频数量: {len(source_ids)} 个
 
-## 视频内容（按时间顺序）：
+## 视频内容（按时间顺序，包含多个视频源）：
 {content_summary}
 
 ## 任务要求：
-1. **headline**: 像新闻标题一样犀利的主标题（15字以内，吸引眼球）
-2. **tldr**: 一句话总结核心价值（50字以内，快速理解）
-3. **key_insights**: 3个关键洞察点，每个30字以内，要具体且有洞察力
+1. **headline**: 像新闻标题一样犀利的主标题（15字以内，综合所有视频的核心主题）
+2. **tldr**: 一句话总结核心价值（50字以内，快速理解所有视频的整体内容）
+3. **key_insights**: 3个关键洞察点，每个30字以内，要综合多个视频的信息，提炼出共性或对比
 
 ## 输出格式（必须是有效JSON对象）：
 ```json
@@ -724,7 +747,7 @@ class AnalysisService:
 
             content = await self.sophnet.chat(
                 messages=[
-                    {"role": "system", "content": "你是一个专业的内容分析师，擅长提炼核心洞察和生成吸引眼球的标题。"},
+                    {"role": "system", "content": "你是一个专业的内容分析师，擅长提炼核心洞察和生成吸引眼球的标题。你能够综合多个视频源的内容，提炼出整体性的洞察。"},
                     {"role": "user", "content": prompt}
                 ],
                 model="DeepSeek-V3.2",
@@ -738,25 +761,43 @@ class AnalysisService:
                 "key_insights": ["内容丰富", "结构清晰", "值得观看"]
             })
 
-            # Generate conceptual illustration using illustrator
+            # Generate conceptual illustration based on video analysis
             conceptual_image = None
             try:
-                logger.info(f"Generating conceptual illustration for: {text_analysis.get('headline', video_title)}")
-                # Use editorial illustration style
-                headline = text_analysis.get("headline", video_title)
-                illustration_prompt = f"Editorial illustration, minimalist, flat design, abstract concept of {headline}, corporate memphis style, professional, clean"
+                logger.info(f"Generating conceptual illustration for: {text_analysis.get('headline', titles_str)}")
+
+                # Build rich prompt based on video analysis content
+                headline = text_analysis.get("headline", titles_str)
+                tldr = text_analysis.get("tldr", "")
+                insights = text_analysis.get("key_insights", [])
+
+                # Extract visual descriptions from docs for context
+                visual_descriptions = []
+                for doc in all_docs[:15]:
+                    metadata = doc.get("metadata", {})
+                    if metadata.get("type") == "visual":
+                        desc = doc.get("text", "")[:100]
+                        if desc and len(visual_descriptions) < 4:
+                            visual_descriptions.append(desc)
+
+                # Create detailed prompt combining analysis + visual context
+                visual_context = f" 视觉元素包括：{'; '.join(visual_descriptions)}" if visual_descriptions else ""
+                insight_context = f" 核心洞察：{'; '.join(insights[:2])}" if insights else ""
+
+                # Use simple Chinese prompt for better compatibility
+                illustration_prompt = f"{headline}。{tldr}{visual_context}{insight_context}。扁平化插画风格，简洁专业，商务杂志配图。"
+
+                logger.info(f"Illustration prompt: {illustration_prompt[:100]}...")
 
                 # Generate image via SophNet
                 from pathlib import Path
                 image_path = await self.sophnet.generate_image(
                     prompt=illustration_prompt,
-                    size="1024*1024"
+                    size="1328*1328"  # Fixed: API only supports 1328*1328
                 )
 
                 if image_path:
                     # Convert path to URL
-                    # Input: D:\DevProject\Viewpoint_Prism\packages\backend\data\temp\generated_images\xxx.png
-                    # Output: /static/temp/generated_images/xxx.png
                     import re
                     normalized_path = image_path.replace("\\", "/")
                     generated_match = re.search(r'(?:^|/)data/temp/generated_images/(.+)$', normalized_path)
@@ -772,6 +813,8 @@ class AnalysisService:
                     logger.info(f"Conceptual image generated: {conceptual_image}")
             except Exception as e:
                 logger.warning(f"Failed to generate conceptual image: {e}")
+                import traceback
+                traceback.print_exc()
 
             # Build response
             from datetime import datetime
@@ -784,15 +827,15 @@ class AnalysisService:
                     "具有参考价值"
                 ])[:3],
                 "conceptual_image": conceptual_image,
-                "evidence_images": screenshot_urls[:2],  # Max 2 screenshots
+                "evidence_images": screenshot_urls[:4],  # Max 4 screenshots
                 "generated_at": datetime.now().isoformat(),
-                "source_id": source_id,
-                "video_title": video_title
+                "source_ids": source_ids,
+                "video_titles": video_titles
             }
 
             # Cache result
             self._cache[cache_key] = result
-            logger.info(f"Generated one-pager for {source_id}")
+            logger.info(f"Generated one-pager for {source_ids}")
 
             return result
 

@@ -402,13 +402,13 @@ class OnePagerData(BaseModel):
     conceptual_image: Optional[str] = None
     evidence_images: List[str] = []
     generated_at: str
-    source_id: str
-    video_title: str
+    source_ids: List[str]  # Changed: support multiple sources
+    video_titles: List[str]  # Changed: list of video titles
 
 
 class OnePagerRequest(BaseModel):
     """Request for one-pager generation."""
-    source_id: str
+    source_ids: List[str]  # Changed: support multiple sources
     use_cache: bool = True
 
 
@@ -418,28 +418,34 @@ async def generate_one_pager(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Generate One-Pager Executive Summary for a video.
+    Generate One-Pager Executive Summary for selected videos.
 
     Creates a magazine-style decision brief with:
     - Compelling headline (15 chars max)
     - TL;DR summary (50 chars max)
     - 3 key insights
     - AI-generated conceptual illustration
-    - Video screenshot evidence
+    - Video screenshot evidence from all selected sources
     """
-    # Verify source exists
-    result = await db.execute(select(Source).where(Source.id == request.source_id))
-    source = result.scalar_one_or_none()
+    if not request.source_ids:
+        raise HTTPException(status_code=400, detail="No source IDs provided")
 
-    if not source:
-        raise HTTPException(status_code=404, detail="Source not found")
+    # Verify sources exist
+    valid_source_ids = []
+    for source_id in request.source_ids:
+        result = await db.execute(select(Source).where(Source.id == source_id))
+        if result.scalar_one_or_none():
+            valid_source_ids.append(source_id)
+
+    if not valid_source_ids:
+        raise HTTPException(status_code=404, detail="No valid sources found")
 
     # Get analysis service
     analysis_service = get_analysis_service()
 
-    # Generate one-pager
+    # Generate one-pager for all selected sources
     one_pager_result = await analysis_service.generate_executive_summary(
-        source_id=request.source_id,
+        source_ids=valid_source_ids,
         use_cache=request.use_cache,
     )
 
@@ -455,8 +461,8 @@ async def generate_one_pager(
         conceptual_image=one_pager_result.get("conceptual_image"),
         evidence_images=one_pager_result.get("evidence_images", []),
         generated_at=one_pager_result.get("generated_at", ""),
-        source_id=one_pager_result.get("source_id", request.source_id),
-        video_title=one_pager_result.get("video_title", ""),
+        source_ids=one_pager_result.get("source_ids", valid_source_ids),
+        video_titles=one_pager_result.get("video_titles", []),
     )
 
 

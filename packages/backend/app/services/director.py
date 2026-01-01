@@ -14,10 +14,14 @@ import asyncio
 import uuid
 import subprocess
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 import logging
 import json
 import re
+import shutil
+
+# Audio duration detection using mutagen (fast, pure Python)
+from mutagen.mp3 import MP3
 
 from app.core import get_settings
 from app.services.sophnet_service import get_sophnet_service
@@ -574,6 +578,31 @@ class DirectorService:
         except Exception as e:
             logger.warning(f"Failed to get audio duration: {e}")
         return 0.0
+
+    def _get_audio_duration_mutagen(self, audio_path: Path) -> float:
+        """
+        Get precise audio duration using mutagen (fast, pure Python).
+
+        This is the preferred method for MP3 files as it's much faster
+        than ffprobe and gives accurate results.
+
+        Args:
+            audio_path: Path to MP3 audio file
+
+        Returns:
+            Duration in seconds, or 0.0 if failed
+        """
+        try:
+            audio = MP3(str(audio_path))
+            duration = audio.info.length
+            logger.debug(f"Mutagen duration for {audio_path.name}: {duration:.3f}s")
+            return duration
+        except Exception as e:
+            logger.warning(f"Mutagen failed for {audio_path}, falling back to ffprobe: {e}")
+            # Fallback to ffprobe for non-MP3 files
+            return asyncio.get_event_loop().run_until_complete(
+                self._get_audio_duration(audio_path)
+            )
 
     async def _create_voiceover_only_clip(
         self,

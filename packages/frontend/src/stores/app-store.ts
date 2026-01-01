@@ -150,7 +150,7 @@ interface AppStore {
   // === One-Pager Report Actions ===
   onePagerData: OnePagerData | null
   isGeneratingOnePager: boolean
-  fetchOnePager: (sourceId: string, useCache?: boolean) => Promise<OnePagerData | null>
+  fetchOnePager: (sourceIds: string[], useCache?: boolean) => Promise<OnePagerData | null>
   setOnePagerData: (data: OnePagerData | null) => void
 }
 
@@ -1063,7 +1063,12 @@ export const useAppStore = create<AppStore>()(
           set({ networkSearchTask: task }),
 
         // === One-Pager Report Actions ===
-        fetchOnePager: async (sourceId: string, useCache: boolean = true) => {
+        fetchOnePager: async (sourceIds: string[], useCache: boolean = true) => {
+          if (sourceIds.length === 0) {
+            console.warn('No source IDs provided for one-pager')
+            return null
+          }
+
           set({ isGeneratingOnePager: true })
 
           try {
@@ -1071,7 +1076,7 @@ export const useAppStore = create<AppStore>()(
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                source_id: sourceId,
+                source_ids: sourceIds,  // Changed: use array of source IDs
                 use_cache: useCache,
               }),
             })

@@ -1398,11 +1398,11 @@ function TimelineView() {
 
 // Report View (One-Pager Executive Summary)
 function ReportView() {
-  const { language, currentSourceId } = useAppStore()
+  const { language, selectedSourceIds } = useAppStore()
 
   return (
     <div className="absolute inset-0 overflow-hidden bg-[#121214]">
-      <OnePager sourceId={currentSourceId} language={language} />
+      <OnePager sourceIds={selectedSourceIds} language={language} />
     </div>
   )
 }

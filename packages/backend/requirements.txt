@@ -25,6 +25,7 @@ yt-dlp>=2023.0.0
 # Creative Generation (Phase 6)
 edge-tts>=6.1.9
 moviepy>=1.0.3
+mutagen>=1.47.0
 
 # Utils
 pydantic>=2.5.3

@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 import type { OnePagerData } from '@/types'
 
 interface OnePagerProps {
-  sourceId: string | null
+  sourceIds: string[]  // Changed: accept array of source IDs
   language?: 'zh' | 'en'
 }
 
@@ -19,18 +19,18 @@ interface EditingData {
 /**
  * OnePager Component
  *
- * A magazine-style decision brief that displays an executive summary of a video.
+ * A magazine-style decision brief that displays an executive summary of selected videos.
  *
  * Features:
  * - AI-generated conceptual illustration as banner
  * - Compelling headline (15 chars max)
  * - TL;DR summary (50 chars max)
  * - 3 key insights
- * - Video screenshot evidence grid
+ * - Video screenshot evidence grid from all selected sources
  * - Download/Share functionality
  * - NYT/Notion-inspired clean design
  */
-export function OnePager({ sourceId, language = 'zh' }: OnePagerProps) {
+export function OnePager({ sourceIds, language = 'zh' }: OnePagerProps) {
   const {
     onePagerData,
     isGeneratingOnePager,
@@ -50,13 +50,21 @@ export function OnePager({ sourceId, language = 'zh' }: OnePagerProps) {
   const [showPromptInput, setShowPromptInput] = useState(false)
   const [conceptualImageLoaded, setConceptualImageLoaded] = useState(false)
 
-  // Auto-fetch when sourceId changes
+  // Helper to compare source ID arrays
+  const sourceIdsMatch = (arr1: string[], arr2: string[]) => {
+    if (arr1.length !== arr2.length) return false
+    const sorted1 = [...arr1].sort()
+    const sorted2 = [...arr2].sort()
+    return sorted1.every((id, i) => id === sorted2[i])
+  }
+
+  // Auto-fetch when sourceIds change
   useEffect(() => {
-    if (sourceId && onePagerData?.source_id !== sourceId) {
-      fetchOnePager(sourceId)
+    if (sourceIds.length > 0 && (!onePagerData || !sourceIdsMatch(sourceIds, onePagerData.source_ids))) {
+      fetchOnePager(sourceIds)
       setConceptualImageLoaded(false) // Reset image load state
     }
-  }, [sourceId])
+  }, [sourceIds])
 
   const t = {
     zh: {
@@ -120,21 +128,22 @@ export function OnePager({ sourceId, language = 'zh' }: OnePagerProps) {
 
   // Regenerate with custom prompt
   const handleRegenerateWithPrompt = async () => {
-    if (!sourceId || !customPrompt.trim()) return
+    if (sourceIds.length === 0 || !customPrompt.trim()) return
 
     setIsRegenerating(true)
     try {
       // Store user preference (for future personalization)
       const userPreferences = JSON.parse(localStorage.getItem('onepager_preferences') || '{}')
-      userPreferences[sourceId] = {
-        ...userPreferences[sourceId],
+      const prefKey = sourceIds.join(',')
+      userPreferences[prefKey] = {
+        ...userPreferences[prefKey],
         customPrompt: customPrompt.trim(),
         lastUsed: new Date().toISOString(),
       }
       localStorage.setItem('onepager_preferences', JSON.stringify(userPreferences))
 
       // Call API with custom prompt (backend needs to support this)
-      await fetchOnePager(sourceId, false)
+      await fetchOnePager(sourceIds, false)
       setShowPromptInput(false)
       setCustomPrompt('')
     } finally {
@@ -143,8 +152,8 @@ export function OnePager({ sourceId, language = 'zh' }: OnePagerProps) {
   }
 
   const handleGenerate = () => {
-    if (sourceId) {
-      fetchOnePager(sourceId, false) // Force regeneration
+    if (sourceIds.length > 0) {
+      fetchOnePager(sourceIds, false) // Force regeneration
     }
   }
 
@@ -152,7 +161,7 @@ export function OnePager({ sourceId, language = 'zh' }: OnePagerProps) {
     // Simulate download
     const link = document.createElement('a')
     link.href = '#'
-    link.download = `one-pager-${onePagerData?.source_id || 'report'}.pdf`
+    link.download = `one-pager-${onePagerData?.source_ids?.join('-') || 'report'}.pdf`
     link.click()
   }
 
@@ -168,7 +177,7 @@ export function OnePager({ sourceId, language = 'zh' }: OnePagerProps) {
             </div>
             <h3 className="text-lg font-bold text-white mb-2">{t[language].generating}</h3>
             <p className="text-sm text-zinc-500 max-w-xs">
-              AI 正在分析视频内容，提炼核心洞察并生成概念配图...
+              AI 正在分析 {sourceIds.length} 个视频内容，提炼核心洞察并生成概念配图...
             </p>
           </>
         ) : (
@@ -179,10 +188,10 @@ export function OnePager({ sourceId, language = 'zh' }: OnePagerProps) {
             <h3 className="text-lg font-bold text-zinc-400 mb-2">{t[language].noData}</h3>
             <button
               onClick={handleGenerate}
-              disabled={!sourceId}
+              disabled={sourceIds.length === 0}
               className={cn(
                 'mt-4 px-6 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center gap-2',
-                sourceId
+                sourceIds.length > 0
                   ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white hover:from-blue-500 hover:to-cyan-500 shadow-lg hover:shadow-blue-500/20'
                   : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
               )}
@@ -190,6 +199,9 @@ export function OnePager({ sourceId, language = 'zh' }: OnePagerProps) {
               <Sparkles className="w-4 h-4" />
               {t[language].generate}
             </button>
+            {sourceIds.length === 0 && (
+              <p className="mt-2 text-xs text-zinc-500">请先在左侧勾选视频源</p>
+            )}
           </>
         )}
       </div>
@@ -513,7 +525,7 @@ export function OnePager({ sourceId, language = 'zh' }: OnePagerProps) {
           className="pt-4 border-t border-zinc-800 text-center"
         >
           <p className="text-[10px] text-zinc-600">
-            Powered by Viewpoint Prism AI • {data.video_title}
+            Powered by Viewpoint Prism AI • {data.video_titles?.join(' / ') || `${data.source_ids?.length || 0} 个视频`}
           </p>
         </motion.div>
       </div>

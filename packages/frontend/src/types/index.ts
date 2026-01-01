@@ -230,8 +230,8 @@ export interface OnePagerData {
   conceptual_image: string | null
   evidence_images: string[]
   generated_at: string
-  source_id: string
-  video_title: string
+  source_ids: string[]  // Changed: support multiple sources
+  video_titles: string[]  // Changed: list of video titles
 }
 
 // App state types
