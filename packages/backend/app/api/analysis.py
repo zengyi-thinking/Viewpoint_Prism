@@ -393,6 +393,73 @@ async def get_knowledge_stats():
     }
 
 
+# One-Pager Report schemas
+class OnePagerData(BaseModel):
+    """One-Pager Executive Summary data."""
+    headline: str
+    tldr: str
+    insights: List[str]
+    conceptual_image: Optional[str] = None
+    evidence_images: List[str] = []
+    generated_at: str
+    source_id: str
+    video_title: str
+
+
+class OnePagerRequest(BaseModel):
+    """Request for one-pager generation."""
+    source_id: str
+    use_cache: bool = True
+
+
+@router.post("/one-pager", response_model=OnePagerData)
+async def generate_one_pager(
+    request: OnePagerRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Generate One-Pager Executive Summary for a video.
+
+    Creates a magazine-style decision brief with:
+    - Compelling headline (15 chars max)
+    - TL;DR summary (50 chars max)
+    - 3 key insights
+    - AI-generated conceptual illustration
+    - Video screenshot evidence
+    """
+    # Verify source exists
+    result = await db.execute(select(Source).where(Source.id == request.source_id))
+    source = result.scalar_one_or_none()
+
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    # Get analysis service
+    analysis_service = get_analysis_service()
+
+    # Generate one-pager
+    one_pager_result = await analysis_service.generate_executive_summary(
+        source_id=request.source_id,
+        use_cache=request.use_cache,
+    )
+
+    # Check for error message
+    if "message" in one_pager_result and "error" in one_pager_result.get("message", ""):
+        raise HTTPException(status_code=500, detail=one_pager_result.get("message"))
+
+    # Return as OnePagerData
+    return OnePagerData(
+        headline=one_pager_result.get("headline", "视频概览"),
+        tldr=one_pager_result.get("tldr", "暂无摘要"),
+        insights=one_pager_result.get("insights", []),
+        conceptual_image=one_pager_result.get("conceptual_image"),
+        evidence_images=one_pager_result.get("evidence_images", []),
+        generated_at=one_pager_result.get("generated_at", ""),
+        source_id=one_pager_result.get("source_id", request.source_id),
+        video_title=one_pager_result.get("video_title", ""),
+    )
+
+
 # Dynamic session ID route must be LAST to avoid matching static routes
 @router.get("/{session_id}", response_model=AnalysisResponse)
 async def get_analysis(

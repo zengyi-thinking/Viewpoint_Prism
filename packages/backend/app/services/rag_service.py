@@ -301,6 +301,175 @@ class RAGService:
             }) + "\n\n"
 
 
+    async def generate_context_bridge(
+        self,
+        source_id: str,
+        target_timestamp: float,
+        previous_timestamp: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate a context bridge summary when user seeks to a new timestamp.
+
+        This helps users understand what happened before and what's happening now,
+        acting as a "Second Brain" feature for video navigation.
+
+        Args:
+            source_id: Video source ID
+            target_timestamp: The timestamp user jumped to (in seconds)
+            previous_timestamp: Optional - where user was before seeking
+
+        Returns:
+            Dict with summary, previous_context, current_context, timestamp_str
+        """
+        try:
+            logger.info(f"Context Bridge: source_id={source_id}, target={target_timestamp}, previous={previous_timestamp}")
+
+            # Format timestamp for display
+            timestamp_str = self._format_timestamp(target_timestamp)
+
+            # Step 1: Get events/segments before the target timestamp
+            # Search for content in the range [max(0, target-300), target]
+            window_start = max(0, target_timestamp - 300)  # Look back up to 5 minutes
+            window_end = target_timestamp
+
+            # Query vector store for content before target timestamp
+            before_results = self.vector_store.collection.get(
+                where={
+                    "$and": [
+                        {"source_id": {"$eq": source_id}},
+                        {"start": {"$gte": window_start}},
+                        {"start": {"$lt": window_end}}
+                    ]
+                },
+                include=["documents", "metadatas"]
+            )
+
+            # Query vector store for content at/after target timestamp
+            # Look ahead up to 2 minutes
+            after_results = self.vector_store.collection.get(
+                where={
+                    "$and": [
+                        {"source_id": {"$eq": source_id}},
+                        {"start": {"$gte": window_end}},
+                        {"start": {"$lt": window_end + 120}}
+                    ]
+                },
+                include=["documents", "metadatas"]
+            )
+
+            # Extract and organize content
+            before_content = []
+            if before_results and before_results.get("documents"):
+                for i, doc in enumerate(before_results["documents"][:10]):  # Max 10 items
+                    meta = before_results["metadatas"][i] if before_results.get("metadatas") else {}
+                    start_time = meta.get("start", 0)
+                    doc_type = meta.get("type", "unknown")
+                    time_str = self._format_timestamp(start_time)
+                    before_content.append(f"[{time_str}] ({doc_type}): {doc[:100]}")
+
+            after_content = []
+            if after_results and after_results.get("documents"):
+                for i, doc in enumerate(after_results["documents"][:5]):  # Max 5 items
+                    meta = after_results["metadatas"][i] if after_results.get("metadatas") else {}
+                    start_time = meta.get("start", 0)
+                    doc_type = meta.get("type", "unknown")
+                    time_str = self._format_timestamp(start_time)
+                    after_content.append(f"[{time_str}] ({doc_type}): {doc[:100]}")
+
+            # Build context prompt
+            before_text = "\n".join(before_content) if before_content else "无此前内容"
+            after_text = "\n".join(after_content) if after_content else "无后续内容"
+
+            # If we have previous_timestamp, provide more context
+            prev_context = ""
+            if previous_timestamp is not None:
+                jump_distance = abs(target_timestamp - previous_timestamp)
+                if jump_distance > 60:
+                    prev_time_str = self._format_timestamp(previous_timestamp)
+                    prev_context = f"\n用户从 {prev_time_str} 跳转到当前时间点，跳过了 {int(jump_distance)} 秒的内容。"
+
+            # Generate bridging summary using SophNet
+            system_prompt = """你是视界棱镜的"哲思导师"助手。当用户在视频中跳转时，你生成简短的"前情提要"帮助用户衔接上下文。
+
+## 你的角色：
+- 不是枯燥的摘要生成器，而是引导者
+- 帮助用户快速理解"之前发生了什么"和"现在到了哪里"
+- 语言简洁、友好、具有引导性
+
+## 输出格式：
+用1-2句话生成转场介绍：
+- 第一句：概括此前的主要内容（如果有的话）
+- 第二句：说明现在进入的场景/话题
+
+## 示例：
+- "此前玩家击败了低手，获得了一些装备。现在来到了一个新的区域，面临更强大的敌人。"
+- "刚才我们学习了基础操作。接下来将进入实战演练环节。"
+
+限制：最多100字，简洁明了。"""
+
+            user_prompt = f"""用户跳转到了视频的 {timestamp_str} 位置。{prev_context}
+
+## 此前内容（跳转点之前）：
+{before_text}
+
+## 当前内容（跳转点附近）：
+{after_text}
+
+请生成一段简短的转场介绍，帮助用户衔接上下文。注意：如果此前内容为空，则重点介绍当前场景。"""
+
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
+
+            summary = await self.sophnet.chat(
+                messages=messages,
+                model=self.model,
+                temperature=0.7,
+                max_tokens=150,  # Short response for UX
+            )
+
+            # Clean up the summary (remove common prefixes)
+            summary = summary.strip()
+            for prefix in ["好的，", "当然，", "以下是", "好的："]:
+                if summary.startswith(prefix):
+                    summary = summary[len(prefix):].strip()
+
+            # Build structured context strings
+            previous_summary = ""
+            if before_content:
+                # Get a brief summary of what happened before
+                if len(before_content) > 0:
+                    earliest = before_content[0]
+                    latest = before_content[-1]
+                    previous_summary = f"从 {earliest.split(']')[0][1:]} 到 {latest.split(']')[0][1:]} 的内容"
+
+            current_summary = ""
+            if after_content:
+                if len(after_content) > 0:
+                    next_item = after_content[0]
+                    current_summary = f"即将进入 {next_item.split(']')[0][1:]} 的内容"
+
+            logger.info(f"Context Bridge generated: '{summary[:50]}...'")
+
+            return {
+                "summary": summary,
+                "previous_context": previous_summary or "视频开头",
+                "current_context": current_summary or f"{timestamp_str} 位置",
+                "timestamp_str": timestamp_str,
+            }
+
+        except Exception as e:
+            logger.error(f"Context bridge generation error: {e}")
+            # Return a fallback response
+            return {
+                "summary": f"跳转到 {timestamp_str} 位置。",
+                "previous_context": "未知",
+                "current_context": f"{timestamp_str}",
+                "timestamp_str": timestamp_str,
+            }
+
+
 # Singleton instance
 _rag_service: Optional[RAGService] = None
 

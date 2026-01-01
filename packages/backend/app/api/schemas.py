@@ -110,3 +110,20 @@ class AnalysisResponse(BaseModel):
     conflicts: List[Conflict]
     graph: KnowledgeGraph
     timeline: List[TimelineEvent]
+
+
+# === Context Bridge Schemas ===
+
+class ContextBridgeRequest(BaseModel):
+    """Request for context bridge generation."""
+    source_id: str
+    timestamp: float
+    previous_timestamp: Optional[float] = None  # Optional: where user was before seeking
+
+
+class ContextBridgeResponse(BaseModel):
+    """Response with bridging context."""
+    summary: str
+    previous_context: str  # What happened before
+    current_context: str   # What's happening now
+    timestamp_str: str     # Formatted timestamp (MM:SS)

@@ -13,6 +13,7 @@ from typing import List, Dict, Any, Optional
 from app.core import get_settings
 from app.services.vector_store import get_vector_store
 from app.services.sophnet_service import get_sophnet_service
+from app.services.illustrator import get_illustrator_service
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -25,6 +26,7 @@ class AnalysisService:
         """Initialize with SophNet service."""
         self.sophnet = get_sophnet_service()
         self.vector_store = get_vector_store()
+        self.illustrator = get_illustrator_service()
 
         # Simple in-memory cache
         self._cache: Dict[str, Any] = {}
@@ -611,6 +613,192 @@ class AnalysisService:
                 conflict["viewpoint_b"]["source_name"] = source_names[viewpoint_b["source_id"]]
 
         return conflicts
+
+    async def generate_executive_summary(
+        self,
+        source_id: str,
+        use_cache: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Generate One-Pager Executive Summary for a video.
+
+        This creates a magazine-style decision brief with:
+        - Compelling headline (15 chars max)
+        - TL;DR summary (50 chars max)
+        - 3 key insights
+        - AI-generated conceptual illustration
+        - Video screenshot evidence
+
+        Args:
+            source_id: Video source ID
+            use_cache: Whether to use cached results
+
+        Returns:
+            Dict with OnePagerData structure
+        """
+        # Check cache
+        cache_key = self._get_cache_key("one_pager", [source_id])
+        if use_cache and cache_key in self._cache:
+            logger.info(f"Returning cached one-pager for {source_id}")
+            return self._cache[cache_key]
+
+        if not settings.sophnet_api_key:
+            return {"message": "AI服务未配置"}
+
+        try:
+            # Get source documents
+            docs = self.vector_store.get_source_documents(source_id)
+            if not docs:
+                return {"message": "没有找到视频内容数据"}
+
+            video_title = docs[0].get("metadata", {}).get("video_title", source_id)
+
+            # Build content summary for LLM
+            content_parts = []
+            docs.sort(key=lambda x: x.get("metadata", {}).get("start", 0))
+            for doc in docs[:50]:
+                metadata = doc.get("metadata", {})
+                timestamp = self._format_timestamp(metadata.get("start", 0))
+                doc_type = metadata.get("type", "unknown")
+                text = doc.get("text", "")[:200]
+                type_label = "画面" if doc_type == "visual" else "语音"
+                content_parts.append(f"[{timestamp}] {type_label}: {text}")
+
+            content_summary = "\n".join(content_parts)
+
+            # Extract screenshot URLs from visual docs
+            screenshot_urls = []
+            for doc in docs:
+                metadata = doc.get("metadata", {})
+                if metadata.get("type") == "visual":
+                    # Check for frame_path in metadata
+                    frame_path = metadata.get("frame_path")
+                    if frame_path and len(screenshot_urls) < 2:
+                        # Convert absolute path to /static/ URL
+                        # Input: D:\DevProject\Viewpoint_Prism\packages\backend\data\temp\{id}\frames\frame_00001.jpg
+                        # Output: /static/temp/{id}/frames/frame_00001.jpg
+                        import re
+                        # Normalize path separators to forward slashes
+                        normalized_path = frame_path.replace("\\", "/")
+                        # Match path after data/temp or data/uploads (regardless of preceding directories)
+                        temp_match = re.search(r'(?:^|/)data/temp/(.+)$', normalized_path)
+                        uploads_match = re.search(r'(?:^|/)data/uploads/(.+)$', normalized_path)
+
+                        if temp_match:
+                            relative_path = temp_match.group(1)
+                            screenshot_urls.append(f"/static/temp/{relative_path}")
+                        elif uploads_match:
+                            relative_path = uploads_match.group(1)
+                            screenshot_urls.append(f"/static/uploads/{relative_path}")
+                    if len(screenshot_urls) >= 2:
+                        break
+
+            # Generate text analysis with DeepSeek
+            prompt = f"""请为以下视频内容生成一份"一页纸决策简报"（Executive Summary）。
+
+## 视频标题: {video_title}
+## 视频ID: {source_id}
+
+## 视频内容（按时间顺序）：
+{content_summary}
+
+## 任务要求：
+1. **headline**: 像新闻标题一样犀利的主标题（15字以内，吸引眼球）
+2. **tldr**: 一句话总结核心价值（50字以内，快速理解）
+3. **key_insights**: 3个关键洞察点，每个30字以内，要具体且有洞察力
+
+## 输出格式（必须是有效JSON对象）：
+```json
+{{
+  "headline": "犀利主标题",
+  "tldr": "一句话总结核心价值",
+  "key_insights": [
+    "关键洞察1",
+    "关键洞察2",
+    "关键洞察3"
+  ]
+}}
+```
+
+请只输出JSON对象："""
+
+            content = await self.sophnet.chat(
+                messages=[
+                    {"role": "system", "content": "你是一个专业的内容分析师，擅长提炼核心洞察和生成吸引眼球的标题。"},
+                    {"role": "user", "content": prompt}
+                ],
+                model="DeepSeek-V3.2",
+                temperature=0.7,
+                max_tokens=1000,
+            )
+
+            text_analysis = self._parse_json_response(content, {
+                "headline": "视频内容概览",
+                "tldr": "本视频包含丰富的信息内容",
+                "key_insights": ["内容丰富", "结构清晰", "值得观看"]
+            })
+
+            # Generate conceptual illustration using illustrator
+            conceptual_image = None
+            try:
+                logger.info(f"Generating conceptual illustration for: {text_analysis.get('headline', video_title)}")
+                # Use editorial illustration style
+                headline = text_analysis.get("headline", video_title)
+                illustration_prompt = f"Editorial illustration, minimalist, flat design, abstract concept of {headline}, corporate memphis style, professional, clean"
+
+                # Generate image via SophNet
+                from pathlib import Path
+                image_path = await self.sophnet.generate_image(
+                    prompt=illustration_prompt,
+                    size="1024*1024"
+                )
+
+                if image_path:
+                    # Convert path to URL
+                    # Input: D:\DevProject\Viewpoint_Prism\packages\backend\data\temp\generated_images\xxx.png
+                    # Output: /static/temp/generated_images/xxx.png
+                    import re
+                    normalized_path = image_path.replace("\\", "/")
+                    generated_match = re.search(r'(?:^|/)data/temp/generated_images/(.+)$', normalized_path)
+
+                    if generated_match:
+                        filename = generated_match.group(1)
+                        conceptual_image = f"/static/temp/generated_images/{filename}"
+                    else:
+                        # Fallback: try to extract filename
+                        filename = Path(image_path).name
+                        conceptual_image = f"/static/temp/generated_images/{filename}"
+
+                    logger.info(f"Conceptual image generated: {conceptual_image}")
+            except Exception as e:
+                logger.warning(f"Failed to generate conceptual image: {e}")
+
+            # Build response
+            from datetime import datetime
+            result = {
+                "headline": text_analysis.get("headline", "视频内容概览")[:30],
+                "tldr": text_analysis.get("tldr", "本视频包含丰富的信息内容")[:100],
+                "insights": text_analysis.get("key_insights", [
+                    "内容丰富详实",
+                    "结构层次清晰",
+                    "具有参考价值"
+                ])[:3],
+                "conceptual_image": conceptual_image,
+                "evidence_images": screenshot_urls[:2],  # Max 2 screenshots
+                "generated_at": datetime.now().isoformat(),
+                "source_id": source_id,
+                "video_title": video_title
+            }
+
+            # Cache result
+            self._cache[cache_key] = result
+            logger.info(f"Generated one-pager for {source_id}")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error generating one-pager: {e}")
+            return {"message": f"生成简报出错: {str(e)}"}
 
     def clear_cache(self, source_ids: Optional[List[str]] = None):
         """Clear cached analysis results."""

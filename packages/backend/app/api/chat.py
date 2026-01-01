@@ -11,7 +11,7 @@ import json
 import logging
 
 from app.core import get_db
-from app.api.schemas import ChatRequest, ChatResponse, ChatReference
+from app.api.schemas import ChatRequest, ChatResponse, ChatReference, ContextBridgeRequest, ContextBridgeResponse
 from app.models import ChatMessage, Source
 from app.services import get_rag_service
 
@@ -221,3 +221,31 @@ async def search_knowledge(
         "results": results,
         "total": len(results)
     }
+
+
+@router.post("/context-bridge", response_model=ContextBridgeResponse)
+async def context_bridge(
+    request: ContextBridgeRequest,
+):
+    """
+    Generate a context bridge summary when user seeks in video.
+
+    This "Second Brain" feature helps users understand what happened
+    before and what's happening now when they jump to a new timestamp.
+
+    The response includes:
+    - summary: AI-generated bridging text
+    - previous_context: Brief description of prior content
+    - current_context: Brief description of current content
+    - timestamp_str: Formatted timestamp (MM:SS)
+    """
+    rag_service = get_rag_service()
+
+    result = await rag_service.generate_context_bridge(
+        source_id=request.source_id,
+        target_timestamp=request.timestamp,
+        previous_timestamp=request.previous_timestamp,
+    )
+
+    return ContextBridgeResponse(**result)
+
