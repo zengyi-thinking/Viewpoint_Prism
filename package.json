@@ -1,0 +1,21 @@
+{
+  "name": "viewpoint-prism",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Multi-source video intelligence analysis system",
+  "scripts": {
+    "dev": "pnpm --parallel run dev",
+    "dev:frontend": "pnpm --filter frontend dev",
+    "dev:backend": "pnpm --filter backend dev",
+    "build": "pnpm --filter frontend build",
+    "lint": "pnpm --parallel run lint",
+    "clean": "pnpm --parallel run clean"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  }
+}

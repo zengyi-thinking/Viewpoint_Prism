@@ -51,20 +51,19 @@ curl --location --request POST "https://www.sophnet.com/api/open-apis/projects/{
 
 `easyllm_id` must be an embeddings model ID (it may be different from the voice model ID).
 
-## Paraformer (speech to text)
+## Image generation (qwen-image)
 
-Audio URL mode:
+Create task (see `imgegenration.txt` for the curl template):
 ```bash
-curl --location --request POST "https://www.sophnet.com/api/open-apis/projects/easyllms/speechtotext/transcriptions" ^
+curl --location --request POST "https://www.sophnet.com/api/open-apis/projects/easyllms/imagegenerator/task" ^
   --header "Authorization: Bearer {API_KEY}" ^
   --header "Content-Type: application/json" ^
-  --data-raw "{\"audio_url\":\"https://example.com/audio.wav\"}"
+  --data-raw "{\"model\":\"qwen-image\",\"input\":{\"prompt\":\"奔跑小猫\"},\"parameters\":{\"size\":\"1328*1328\",\"seed\":42}}"
 ```
 
-File upload mode:
+Get task result (returns image URL):
 ```bash
-curl --location --request POST "https://www.sophnet.com/api/open-apis/projects/easyllms/speechtotext/transcriptions" ^
+curl --location --request GET "https://www.sophnet.com/api/open-apis/projects/easyllms/imagegenerator/task/{TaskId}" ^
   --header "Authorization: Bearer {API_KEY}" ^
-  --form "audio_file=@/path/to/your_audio_file.wav;type=audio/wav"
+  --header "Content-Type: application/json"
 ```
-

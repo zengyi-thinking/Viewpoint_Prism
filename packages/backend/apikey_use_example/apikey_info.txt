@@ -10,5 +10,3 @@ ttseasyllmId:
 embeddings:
 6yXUAJl2jrJJLtgiKPq8vH
 
-stteasyllmId:
-x2u0AJ4lrwebvD95Znjgs
