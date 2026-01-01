@@ -3,17 +3,26 @@ Analysis Service
 Generates AI-powered analysis artifacts: conflicts, timeline, and knowledge graph.
 
 Uses SophNet DeepSeek-V3.2 for all AI analysis tasks.
+Uses Qwen2.5-VL for visual evidence caption generation.
 """
 
 import json
 import hashlib
 import logging
-from typing import List, Dict, Any, Optional
+import asyncio
+from typing import List, Dict, Any, Optional, TypedDict
 
 from app.core import get_settings
 from app.services.vector_store import get_vector_store
 from app.services.sophnet_service import get_sophnet_service
 from app.services.illustrator import get_illustrator_service
+
+
+class EvidenceItem(TypedDict):
+    """Evidence image with AI-generated caption."""
+    url: str
+    caption: str
+    related_insight_index: Optional[int]
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -682,8 +691,9 @@ class AnalysisService:
 
             content_summary = "\n".join(content_parts)
 
-            # Extract screenshot URLs from visual docs (from ALL sources)
-            screenshot_urls = []
+            # Extract screenshot data from visual docs (from ALL sources)
+            # Store both URL and local path for VL caption generation
+            screenshot_data = []  # List of (url, frame_path)
             screenshots_per_source = max(1, 4 // len(source_ids))  # Distribute across sources
             source_screenshot_count = {sid: 0 for sid in source_ids}
 
@@ -708,11 +718,11 @@ class AnalysisService:
                                 relative_path = uploads_match.group(1)
                                 url = f"/static/uploads/{relative_path}"
 
-                            if url and url not in screenshot_urls:
-                                screenshot_urls.append(url)
+                            if url and not any(d[0] == url for d in screenshot_data):
+                                screenshot_data.append((url, frame_path))
                                 source_screenshot_count[source_id] = source_screenshot_count.get(source_id, 0) + 1
 
-                if len(screenshot_urls) >= 4:  # Max 4 screenshots total
+                if len(screenshot_data) >= 4:  # Max 4 screenshots total
                     break
 
             # Generate text analysis with DeepSeek
@@ -816,7 +826,53 @@ class AnalysisService:
                 import traceback
                 traceback.print_exc()
 
-            # Build response
+            # Generate VL Captions for evidence images using Qwen2.5-VL (parallel processing)
+            headline = text_analysis.get("headline", titles_str)
+            evidence_items: List[EvidenceItem] = []
+
+            async def generate_caption_for_image(idx: int, url: str, frame_path: str) -> EvidenceItem:
+                """Generate caption for a single image using Qwen2.5-VL."""
+                try:
+                    from pathlib import Path
+                    prompt = f"这张图片是视频关于'{headline}'的高光时刻。请用简练、专业的语言描述图片中的关键信息（如PPT文字、人物动作或数据趋势），字数限制30字以内。"
+
+                    caption = await self.sophnet.analyze_video_frame(
+                        prompt=prompt,
+                        image_path=Path(frame_path),
+                        model="Qwen2.5-VL-72B-Instruct"
+                    )
+
+                    # Clean up caption (remove quotes if present)
+                    caption = caption.strip().strip('"').strip("'")
+                    if len(caption) > 60:
+                        caption = caption[:57] + "..."
+
+                    logger.info(f"Generated caption for image {idx + 1}: {caption[:50]}...")
+
+                    return EvidenceItem(
+                        url=url,
+                        caption=caption,
+                        related_insight_index=idx % 3 if idx < 3 else None
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to generate caption for image {idx + 1}: {e}")
+                    return EvidenceItem(
+                        url=url,
+                        caption="",
+                        related_insight_index=None
+                    )
+
+            # Process images in parallel using asyncio.gather
+            if screenshot_data:
+                logger.info(f"Generating VL captions for {len(screenshot_data)} images in parallel...")
+                caption_tasks = [
+                    generate_caption_for_image(idx, url, frame_path)
+                    for idx, (url, frame_path) in enumerate(screenshot_data[:4])
+                ]
+                evidence_items = await asyncio.gather(*caption_tasks)
+                logger.info(f"Generated {len(evidence_items)} VL captions")
+
+            # Build response with evidence_items (new structure)
             from datetime import datetime
             result = {
                 "headline": text_analysis.get("headline", "视频内容概览")[:30],
@@ -827,7 +883,8 @@ class AnalysisService:
                     "具有参考价值"
                 ])[:3],
                 "conceptual_image": conceptual_image,
-                "evidence_images": screenshot_urls[:4],  # Max 4 screenshots
+                "evidence_items": evidence_items,  # New: structured evidence with captions
+                "evidence_images": [item["url"] for item in evidence_items],  # Backward compat
                 "generated_at": datetime.now().isoformat(),
                 "source_ids": source_ids,
                 "video_titles": video_titles

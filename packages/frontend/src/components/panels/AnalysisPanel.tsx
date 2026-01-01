@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useAppStore } from '@/stores/app-store'
-import { Zap, GitBranch, Clock, AlertTriangle, Sparkles, RefreshCw, Loader2, Film, Download, Play, Pause, X, Video, BookOpen, Swords, Footprints, Check, Clapperboard, ArrowLeft, FileText, Network, Scissors, Image, Expand, Grid3X3 } from 'lucide-react'
+import { Zap, AlertTriangle, Sparkles, RefreshCw, Loader2, Film, Download, Play, Pause, X, Video, BookOpen, Swords, Footprints, Check, Clapperboard, ArrowLeft, FileText, Network, Scissors, Image, Grid3X3 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import * as echarts from 'echarts'
-import type { AnalysisTab, Conflict, DebateTask, GraphNode, DirectorTask, Persona, StoryboardFrame } from '@/types'
+import type { Conflict, DebateTask, GraphNode, DirectorTask, Persona } from '@/types'
 import { FeatureCard } from '@/components/ui/FeatureCard'
 import { OnePager } from '@/components/ui/OnePager'
 

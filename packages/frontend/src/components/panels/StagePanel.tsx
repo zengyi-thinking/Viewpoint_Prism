@@ -1,5 +1,5 @@
 import { useAppStore } from '@/stores/app-store'
-import { Play, Pause, Captions, Maximize, Terminal, MoreHorizontal, ArrowUp, Film, Volume2, VolumeX, Clock, FastForward, Gauge } from 'lucide-react'
+import { Play, Pause, Maximize, Terminal, MoreHorizontal, ArrowUp, Film, Volume2, VolumeX, Clock, FastForward } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState, useRef, useEffect, useCallback } from 'react'
 
@@ -34,18 +34,11 @@ export function VideoPlayer() {
 
   // Context Bridge: User memory - track which time ranges user frequently seeks to
   const seekMemoryRef = useRef<Map<number, number>>(new Map())  // timeRange -> count
-  const contextBridgeTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const contextBridgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSeekPositionRef = useRef<number>(0)
 
   const currentSource = sources.find((s) => s.id === currentSourceId)
   const videoUrl = currentSource ? `${API_BASE}${currentSource.url}` : null
-
-  // Format timestamp for display
-  const formatTimestamp = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = Math.floor(seconds % 60)
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-  }
 
   // Context Bridge: Fetch bridging context and add as AI message in chat
   const fetchAndShowContextBridge = useCallback(async (targetTimestamp: number, previousTimestamp?: number) => {

@@ -223,12 +223,19 @@ export interface NetworkSearchRequest {
 }
 
 // One-Pager Report types
+export interface EvidenceItem {
+  url: string
+  caption: string
+  related_insight_index: number | null
+}
+
 export interface OnePagerData {
   headline: string
   tldr: string
   insights: string[]
   conceptual_image: string | null
-  evidence_images: string[]
+  evidence_items: EvidenceItem[]  // New: structured evidence with captions
+  evidence_images: string[]  // Backward compat
   generated_at: string
   source_ids: string[]  // Changed: support multiple sources
   video_titles: string[]  // Changed: list of video titles
