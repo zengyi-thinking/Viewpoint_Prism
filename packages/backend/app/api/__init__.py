@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api import upload, chat, analysis, creative, ingest, montage
+from app.api import upload, chat, analysis, creative, ingest, montage, webtoon
 
 router = APIRouter()
 
@@ -10,3 +10,4 @@ router.include_router(analysis.router)
 router.include_router(creative.router)
 router.include_router(ingest.router)
 router.include_router(montage.router)
+router.include_router(webtoon.router)

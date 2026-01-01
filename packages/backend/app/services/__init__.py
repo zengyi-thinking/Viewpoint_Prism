@@ -10,6 +10,7 @@ from .director import DirectorService, get_director_service
 from .illustrator import IllustratorService, get_illustrator_service
 from .sophnet_service import SophNetService, get_sophnet_service
 from .montage_service import MontageService, get_montage_service
+from .webtoon_service import WebtoonService, get_webtoon_service
 
 __all__ = [
     "MediaProcessor",
@@ -34,4 +35,6 @@ __all__ = [
     "get_sophnet_service",
     "MontageService",
     "get_montage_service",
+    "WebtoonService",
+    "get_webtoon_service",
 ]

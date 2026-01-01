@@ -231,46 +231,85 @@ export function NebulaPanel() {
     setIsPlaying(false)
   }, [])
 
-  // Custom node rendering with glow effect
+  // Custom node rendering with enhanced glow effect
   const nodeThreeObject = useCallback((node: NebulaNode) => {
     const isHighlighted = highlightNodes.has(node.id)
     const isHovered = hoverNode?.id === node.id
     const color = GROUP_COLORS[node.group] || GROUP_COLORS.concept
 
-    // Create sprite for glow effect
-    const sprite = new THREE.Sprite(
+    // Create a group to hold mesh and label
+    const group = new THREE.Group()
+
+    // Calculate size based on value (frequency)
+    // Higher frequency = larger and brighter
+    const baseRadius = Math.max(2, Math.min(8, Math.sqrt(node.val) * 0.8))
+    const radius = isHighlighted || isHovered ? baseRadius * 1.3 : baseRadius
+
+    // Create glowing sphere mesh with MeshLambertMaterial
+    const geometry = new THREE.SphereGeometry(radius, 16, 16)
+    const material = new THREE.MeshLambertMaterial({
+      color: color,
+      transparent: true,
+      opacity: isHighlighted ? 1.0 : 0.85,
+      emissive: new THREE.Color(color),
+      emissiveIntensity: isHighlighted ? 1.5 : Math.min(1.2, node.val / 8), // CRITICAL: brightness scales with frequency
+    })
+
+    const sphere = new THREE.Mesh(geometry, material)
+    group.add(sphere)
+
+    // Add outer glow sprite for enhanced effect
+    const glowSprite = new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: createGlowTexture(color, isHighlighted || isHovered),
         transparent: true,
-        opacity: isHighlighted ? 1.0 : 0.8,
+        opacity: isHighlighted ? 0.9 : 0.6,
+        blending: THREE.AdditiveBlending,
       })
     )
-
-    // Size based on value (frequency)
-    const baseSize = Math.max(8, Math.min(30, Math.sqrt(node.val) * 3))
-    const size = isHighlighted ? baseSize * 1.5 : baseSize
-    sprite.scale.set(size, size, 1)
+    const glowSize = radius * 4
+    glowSprite.scale.set(glowSize, glowSize, 1)
+    group.add(glowSprite)
 
     // Add label for high-value nodes or hovered
-    if (node.val > 10 || isHovered) {
+    if (node.val > 8 || isHovered || isHighlighted) {
       const label = new SpriteText(node.id)
       label.color = '#ffffff'
-      label.textHeight = isHovered ? 4 : 3
-      label.position.y = size / 2 + 5
-      sprite.add(label as any)
+      label.textHeight = isHovered ? 5 : 4
+      label.backgroundColor = 'rgba(0,0,0,0.6)'
+      label.padding = 2
+      label.borderRadius = 3
+      label.position.y = radius + 8
+      group.add(label as any)
     }
 
-    return sprite
+    return group
   }, [highlightNodes, hoverNode])
 
-  // Memoize graph config
+  // Memoize graph config with enhanced link styling
   const graphConfig = useMemo(() => ({
     backgroundColor: '#030712',
-    linkColor: () => 'rgba(100, 100, 140, 0.3)',
-    linkWidth: (link: NebulaLink) => Math.sqrt(link.value) * 0.5,
+    linkColor: () => 'rgba(255, 255, 255, 0.2)', // Semi-transparent white lines
+    linkWidth: 0.5, // Fixed thin line width
+    linkOpacity: 0.3,
     nodeRelSize: 1,
     warmupTicks: 100,
     cooldownTicks: 0,
+    // Add ambient light for MeshLambertMaterial to work
+    onEngineInit: (engine: any) => {
+      // Add ambient light
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6)
+      engine.scene().add(ambientLight)
+
+      // Add point lights for better 3D effect
+      const pointLight1 = new THREE.PointLight(0x6366f1, 1.5, 1000)
+      pointLight1.position.set(200, 200, 200)
+      engine.scene().add(pointLight1)
+
+      const pointLight2 = new THREE.PointLight(0x06b6d4, 1.2, 1000)
+      pointLight2.position.set(-200, -100, 200)
+      engine.scene().add(pointLight2)
+    },
   }), [])
 
   return (
@@ -474,22 +513,38 @@ export function NebulaPanel() {
   )
 }
 
-// Helper: Create glow texture for nodes
+// Helper: Create enhanced glow texture for nodes
 function createGlowTexture(color: string, intense: boolean = false): THREE.Texture {
   const canvas = document.createElement('canvas')
-  canvas.width = 64
-  canvas.height = 64
+  canvas.width = 128 // Higher resolution for better quality
+  canvas.height = 128
   const ctx = canvas.getContext('2d')!
 
-  // Create radial gradient for glow
-  const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32)
-  gradient.addColorStop(0, intense ? color : `${color}ff`)
-  gradient.addColorStop(0.3, intense ? color : `${color}aa`)
-  gradient.addColorStop(0.6, `${color}44`)
-  gradient.addColorStop(1, 'transparent')
+  const centerX = 64
+  const centerY = 64
+
+  // Create radial gradient for glow - brighter core
+  const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, 64)
+
+  if (intense) {
+    // Highlighted node - very bright
+    gradient.addColorStop(0, '#ffffff')
+    gradient.addColorStop(0.1, color)
+    gradient.addColorStop(0.3, `${color}cc`)
+    gradient.addColorStop(0.5, `${color}66`)
+    gradient.addColorStop(0.7, `${color}22`)
+    gradient.addColorStop(1, 'transparent')
+  } else {
+    // Normal node - still glowing
+    gradient.addColorStop(0, `${color}ff`)
+    gradient.addColorStop(0.2, `${color}bb`)
+    gradient.addColorStop(0.4, `${color}66`)
+    gradient.addColorStop(0.6, `${color}33`)
+    gradient.addColorStop(1, 'transparent')
+  }
 
   ctx.fillStyle = gradient
-  ctx.fillRect(0, 0, 64, 64)
+  ctx.fillRect(0, 0, 128, 128)
 
   const texture = new THREE.CanvasTexture(canvas)
   texture.needsUpdate = true

@@ -10,17 +10,21 @@ import subprocess
 import tempfile
 import uuid
 from collections import Counter, defaultdict
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
 
-from app.core.config import settings
-from app.core.database import SessionLocal
+from app.core import get_settings
+from app.core.database import async_session
 from app.models.models import Source
 from app.services.vector_store import get_vector_store
 from app.services.sophnet_service import get_sophnet_service
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
+GENERATED_DIR = Path(settings.upload_dir).parent / "generated"
+GENERATED_DIR.mkdir(parents=True, exist_ok=True)
 
 # Singleton instance
 _montage_service: Optional["MontageService"] = None
@@ -39,8 +43,7 @@ class MontageService:
 
     def __init__(self):
         self.tasks: Dict[str, Dict[str, Any]] = {}
-        self.generated_dir = settings.GENERATED_DIR
-        os.makedirs(self.generated_dir, exist_ok=True)
+        self.generated_dir = str(GENERATED_DIR)
 
     def create_task(self) -> str:
         """Create a new task and return its ID."""
@@ -390,7 +393,7 @@ class MontageService:
         clips = []
         total_duration = 0
 
-        with SessionLocal() as db:
+        async with async_session() as db:
             for i, seg in enumerate(segments):
                 if total_duration >= max_duration:
                     break
@@ -399,7 +402,8 @@ class MontageService:
                 if not source_id:
                     continue
 
-                source = db.query(Source).filter(Source.id == source_id).first()
+                result = await db.execute(select(Source).where(Source.id == source_id))
+                source = result.scalars().first()
                 if not source or not source.file_path:
                     continue
 

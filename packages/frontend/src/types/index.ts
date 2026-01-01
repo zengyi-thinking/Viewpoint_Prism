@@ -241,6 +241,46 @@ export interface OnePagerData {
   video_titles: string[]  // Changed: list of video titles
 }
 
+// Phase 13: Webtoon / Story Stream types
+export interface WebtoonVideoSegment {
+  source_id: string
+  start: number
+  end: number
+}
+
+export interface WebtoonPanel {
+  panel_number: number
+  time: number
+  time_formatted: string
+  caption: string
+  characters: string
+  frame_description?: string  // For blog narrative
+  manga_image_url: string
+  original_frame_url: string
+  video_segment: WebtoonVideoSegment
+}
+
+// Phase 14: Cinematic Blog types
+export interface BlogSection {
+  type: 'text' | 'panel'
+  content?: string      // For text sections
+  panel_index?: number  // For panel sections (0-indexed)
+}
+
+export interface WebtoonTask {
+  task_id: string
+  status: 'pending' | 'extracting' | 'analyzing' | 'scripting' | 'drawing' | 'writing' | 'completed' | 'error'
+  progress: number
+  message: string
+  panels: WebtoonPanel[]
+  total_panels: number
+  current_panel: number
+  // Cinematic Blog fields
+  blog_title?: string
+  blog_sections?: BlogSection[]
+  error?: string
+}
+
 // App state types
 export interface AppState {
   // Sources

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useAppStore } from '@/stores/app-store'
-import { Zap, AlertTriangle, Sparkles, RefreshCw, Loader2, Film, Download, Play, Pause, X, Video, BookOpen, Swords, Footprints, Check, Clapperboard, ArrowLeft, FileText, Scissors, Image, Grid3X3 } from 'lucide-react'
+import { Zap, AlertTriangle, Sparkles, RefreshCw, Loader2, Film, Download, Play, Pause, X, Video, BookOpen, Swords, Footprints, Check, Clapperboard, ArrowLeft, FileText, Scissors, Image, Grid3X3, Palette } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import * as echarts from 'echarts'
 import type { Conflict, DebateTask, GraphNode, DirectorTask, Persona } from '@/types'
 import { FeatureCard } from '@/components/ui/FeatureCard'
 import { OnePager } from '@/components/ui/OnePager'
 import { NebulaPanel } from '@/components/ui/NebulaPanel'
+import { BlogPanel } from '@/components/ui/BlogPanel'
 
 // Persona configurations for UI
 const PERSONAS: Array<{ id: Persona; name: string; emoji: string; description: string }> = [
@@ -1417,6 +1418,15 @@ function NebulaView() {
   )
 }
 
+// Webtoon View (Cinematic Blog - AI Editorial Generator)
+function WebtoonView() {
+  return (
+    <div className="absolute inset-0 overflow-hidden">
+      <BlogPanel />
+    </div>
+  )
+}
+
 // Studio Dashboard View
 function StudioDashboard({ onNavigate }: { onNavigate: (view: string) => void }) {
   const { language, fetchAnalysis, isAnalyzing, selectedSourceIds } = useAppStore()
@@ -1465,12 +1475,12 @@ function StudioDashboard({ onNavigate }: { onNavigate: (view: string) => void })
       glowColor: 'bg-gradient-to-br from-cyan-600/20 to-purple-600/20',
     },
     {
-      id: 'timeline',
-      icon: Scissors,
-      title: language === 'zh' ? '剧情浓缩' : 'Smart Digest',
-      description: language === 'zh' ? '智能识别剧情/战斗，生成纯享版' : 'Smart digest: story & combat highlights only',
-      color: 'bg-gradient-to-br from-amber-600 to-yellow-600',
-      glowColor: 'bg-gradient-to-br from-amber-600/20 to-yellow-600/20',
+      id: 'webtoon',
+      icon: BookOpen,
+      title: language === 'zh' ? '电影博客' : 'Cinematic Blog',
+      description: language === 'zh' ? 'AI 生成深度图文博客，漫画插图配文章' : 'AI editorial articles with manga illustrations',
+      color: 'bg-gradient-to-br from-amber-600 to-orange-600',
+      glowColor: 'bg-gradient-to-br from-amber-600/20 to-orange-600/20',
     },
     {
       id: 'report',
@@ -1586,6 +1596,7 @@ export function AnalysisPanel() {
             {activeView === 'conflicts' && <ConflictsView />}
             {activeView === 'nebula' && <NebulaView />}
             {activeView === 'timeline' && <TimelineView />}
+            {activeView === 'webtoon' && <WebtoonView />}
             {activeView === 'report' && <ReportView />}
           </div>
         </>

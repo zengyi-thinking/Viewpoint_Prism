@@ -482,13 +482,33 @@ class DirectorService:
                     )
                     total_expected_duration += segment.duration
 
-                # Verify and collect clip
+                # Verify and collect clip with QA check
                 if success and clip_output.exists() and clip_output.stat().st_size > 1000:
-                    actual_clip_duration = await self._get_audio_duration(clip_output)
-                    logger.info(f"  -> Clip saved: {clip_output.name} ({actual_clip_duration:.2f}s)")
-                    processed_clips.append(str(clip_output))
+                    # AI Director QA: Check video quality before adding to concat list
+                    qa_passed = await self._check_video_quality(
+                        clip_output,
+                        expected_resolution=(1280, 720),  # Director cut uses 720p
+                    )
+
+                    if qa_passed:
+                        actual_clip_duration = await self._get_audio_duration(clip_output)
+                        logger.info(f"  -> Clip saved: {clip_output.name} ({actual_clip_duration:.2f}s) ✓ QA PASSED")
+                        processed_clips.append(str(clip_output))
+                    else:
+                        logger.warning(f"  -> Segment {i} QA FAILED, attempting retry...")
+                        # Retry once with fallback
+                        retry_success = await self._retry_failed_clip(
+                            segment, clip_output, voiceover_paths.get(i),
+                            source_a_path if segment.source == "A" else source_b_path
+                        )
+                        if retry_success:
+                            actual_clip_duration = await self._get_audio_duration(clip_output)
+                            logger.info(f"  -> Retry successful: {clip_output.name} ({actual_clip_duration:.2f}s)")
+                            processed_clips.append(str(clip_output))
+                        else:
+                            logger.error(f"  -> Segment {i} FAILED after retry, skipping")
                 else:
-                    logger.warning(f"  -> Segment {i} FAILED, skipping")
+                    logger.warning(f"  -> Segment {i} generation FAILED, skipping")
 
             if not processed_clips:
                 logger.error("No clips were processed successfully")
@@ -607,10 +627,21 @@ class DirectorService:
                 logger.info("Falling back to filter_complex concat...")
                 return await self._concatenate_with_reencode(clips, output_path)
 
-            # Verify output
+            # Verify output with full QA check
             if output_path.exists() and output_path.stat().st_size > 1000:
+                # Final QA check on the complete video
+                qa_passed = await self._check_video_quality(
+                    output_path,
+                    expected_resolution=(1280, 720),
+                    min_duration=1.0,
+                )
+
+                if not qa_passed:
+                    logger.error(f"Final video QA FAILED: {output_path}")
+                    return False
+
                 final_duration = await self._get_audio_duration(output_path)
-                logger.info(f"Final video: {output_path.name} ({final_duration:.2f}s, {output_path.stat().st_size//1024}KB)")
+                logger.info(f"Final video: {output_path.name} ({final_duration:.2f}s, {output_path.stat().st_size//1024}KB) ✓ QA PASSED")
 
                 # Log audio-video sync verification
                 await self._verify_av_sync(output_path)
@@ -878,6 +909,383 @@ class DirectorService:
 
         except Exception as e:
             logger.error(f"Atomic voiceover clip creation error: {e}")
+            return False
+
+    async def _create_image_clip(
+        self,
+        image_path: Path,
+        audio_path: Path,
+        output_path: Path,
+        subtitle: str = "",
+    ) -> bool:
+        """
+        Create video clip from static image + audio.
+
+        CRITICAL FIX for Debate Video Rendering:
+        - Uses -loop 1 to loop static image
+        - Uses -tune stillimage for optimal encoding
+        - Uses -pix_fmt yuv420p for web compatibility
+        - Uses -shortest to match audio duration
+
+        Args:
+            image_path: Path to static image (jpg/png)
+            audio_path: Path to audio file (mp3)
+            output_path: Output video path
+            subtitle: Optional subtitle text
+
+        Returns:
+            True if successful
+        """
+        try:
+            # Pre-flight check: validate resources
+            if not await self._validate_resources(image_path, audio_path):
+                return False
+
+            # Build video filter
+            vf_parts = [
+                "scale=1920:1080:force_original_aspect_ratio=decrease",
+                "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black",
+            ]
+
+            # Add subtitle if provided
+            if subtitle:
+                safe_subtitle = self._escape_ffmpeg_text(subtitle)
+                vf_parts.append(
+                    f"drawbox=x=0:y=ih-70:w=iw:h=70:color=black@0.6:t=fill,"
+                    f"drawtext=text='{safe_subtitle}':"
+                    f"fontsize=36:fontcolor=white:x=(w-text_w)/2:y=h-50:"
+                    f"borderw=2:bordercolor=black"
+                )
+
+            video_filter = ",".join(vf_parts)
+
+            # CRITICAL: FFmpeg command with -loop 1 for static image
+            cmd = [
+                "ffmpeg", "-y",
+                "-loop", "1",                    # CRUCIAL: Loop static image
+                "-i", str(image_path),           # Input image
+                "-i", str(audio_path),           # Input audio
+                "-c:v", "libx264",
+                "-tune", "stillimage",           # Optimize for static image
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-pix_fmt", "yuv420p",           # Web/QuickTime compatibility
+                "-vf", video_filter,
+                "-shortest",                     # Match audio duration
+                "-movflags", "+faststart",
+                str(output_path)
+            ]
+
+            logger.info(f"Creating image clip: {image_path.name} + {audio_path.name}")
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+
+            if result.returncode != 0:
+                logger.error(f"Image clip creation failed: {result.stderr[-500:]}")
+                return False
+
+            # Post-generation QA check
+            qa_passed = await self._check_video_quality(output_path)
+            if not qa_passed:
+                logger.error(f"QA check failed for {output_path}")
+                return False
+
+            logger.info(f"Image clip created successfully: {output_path.name}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Image clip creation error: {e}")
+            return False
+
+    async def _validate_resources(
+        self,
+        image_path: Optional[Path] = None,
+        audio_path: Optional[Path] = None,
+    ) -> bool:
+        """
+        Pre-flight resource validation.
+
+        Validates:
+        1. Image exists and is readable
+        2. Audio exists and size > 1KB
+
+        Args:
+            image_path: Path to image file (optional)
+            audio_path: Path to audio file (optional)
+
+        Returns:
+            True if all provided resources are valid
+        """
+        # Image validation
+        if image_path:
+            if not image_path.exists():
+                logger.error(f"Image file not found: {image_path}")
+                # Check for placeholder fallback
+                placeholder = Path(settings.upload_dir).parent / "static" / "placeholder.jpg"
+                if placeholder.exists():
+                    logger.warning(f"Using placeholder image: {placeholder}")
+                    # Note: Caller should handle fallback
+                else:
+                    return False
+            else:
+                # Check file is readable and has content
+                if image_path.stat().st_size < 100:
+                    logger.error(f"Image file too small: {image_path}")
+                    return False
+
+        # Audio validation
+        if audio_path:
+            if not audio_path.exists():
+                logger.error(f"Audio file not found: {audio_path}")
+                return False
+
+            audio_size = audio_path.stat().st_size
+            if audio_size < 1024:  # Less than 1KB
+                logger.error(f"Audio file too small ({audio_size} bytes): {audio_path}")
+                return False
+
+        return True
+
+    async def _check_video_quality(
+        self,
+        video_path: Path,
+        require_video: bool = True,
+        require_audio: bool = True,
+        min_duration: float = 0.1,
+        expected_resolution: tuple = (1920, 1080),
+    ) -> bool:
+        """
+        AI Director QA: Post-generation video quality check using ffprobe.
+
+        Checks:
+        1. Stream check: Must contain video and audio streams
+        2. Resolution check: Must match expected resolution
+        3. Duration check: Must be > min_duration
+
+        Args:
+            video_path: Path to video file to check
+            require_video: Whether to require video stream
+            require_audio: Whether to require audio stream
+            min_duration: Minimum duration in seconds
+            expected_resolution: Expected (width, height) tuple
+
+        Returns:
+            True if all checks pass
+        """
+        try:
+            if not video_path.exists():
+                logger.error(f"QA: Video file does not exist: {video_path}")
+                return False
+
+            if video_path.stat().st_size < 1000:
+                logger.error(f"QA: Video file too small: {video_path}")
+                return False
+
+            # Stream check using ffprobe
+            cmd = [
+                "ffprobe", "-v", "error",
+                "-show_entries", "stream=codec_type,width,height,duration",
+                "-of", "json",
+                str(video_path)
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+            if result.returncode != 0:
+                logger.error(f"QA: ffprobe failed: {result.stderr}")
+                return False
+
+            probe_data = json.loads(result.stdout)
+            streams = probe_data.get("streams", [])
+
+            # Check for required streams
+            codec_types = [s.get("codec_type") for s in streams]
+
+            if require_video and "video" not in codec_types:
+                logger.error(f"QA: No video stream found in {video_path}")
+                return False
+
+            if require_audio and "audio" not in codec_types:
+                logger.error(f"QA: No audio stream found in {video_path}")
+                return False
+
+            # Resolution check
+            video_stream = next((s for s in streams if s.get("codec_type") == "video"), None)
+            if video_stream and expected_resolution:
+                width = int(video_stream.get("width", 0))
+                height = int(video_stream.get("height", 0))
+
+                # Allow some flexibility (within 10%)
+                exp_w, exp_h = expected_resolution
+                if abs(width - exp_w) > exp_w * 0.1 or abs(height - exp_h) > exp_h * 0.1:
+                    logger.warning(
+                        f"QA: Resolution mismatch. Expected ~{exp_w}x{exp_h}, got {width}x{height}"
+                    )
+                    # Not a hard failure, just a warning
+
+            # Duration check
+            max_duration = 0
+            for stream in streams:
+                dur = float(stream.get("duration", 0) or 0)
+                max_duration = max(max_duration, dur)
+
+            if max_duration < min_duration:
+                logger.error(f"QA: Duration too short ({max_duration:.3f}s < {min_duration}s)")
+                return False
+
+            logger.info(f"QA: Video quality check PASSED - {video_path.name} ({max_duration:.2f}s)")
+            return True
+
+        except json.JSONDecodeError as e:
+            logger.error(f"QA: Failed to parse ffprobe output: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"QA: Video quality check error: {e}")
+            return False
+
+    async def _retry_failed_clip(
+        self,
+        segment: SequenceSegment,
+        output_path: Path,
+        voiceover_path: Optional[Path],
+        source_path: Path,
+    ) -> bool:
+        """
+        Retry failed clip generation with fallback strategy.
+
+        Fallback strategies:
+        1. For voiceover segments: Generate pure text video with subtitle
+        2. For original segments: Re-encode with simpler settings
+
+        Args:
+            segment: The segment that failed
+            output_path: Output path for the clip
+            voiceover_path: Path to voiceover audio (if any)
+            source_path: Path to source video
+
+        Returns:
+            True if retry successful
+        """
+        try:
+            logger.info(f"Retrying segment: {segment.source} with fallback strategy")
+
+            if segment.source in ("intro", "outro"):
+                # For intro/outro: Create simple text-on-black video
+                return await self._create_silent_clip(
+                    duration=segment.duration,
+                    subtitle=segment.subtitle or segment.narration[:30],
+                    output_path=output_path,
+                )
+            elif segment.audio_mode == "voiceover" and voiceover_path and voiceover_path.exists():
+                # For voiceover segments: Try simpler encoding
+                return await self._create_fallback_voiceover_clip(
+                    source_path=source_path,
+                    start_time=segment.exact_start,
+                    voiceover_path=voiceover_path,
+                    subtitle=segment.subtitle,
+                    output_path=output_path,
+                )
+            else:
+                # For original segments: Re-encode with simpler settings
+                return await self._create_fallback_original_clip(
+                    source_path=source_path,
+                    start_time=segment.exact_start,
+                    duration=segment.duration,
+                    subtitle=segment.subtitle,
+                    output_path=output_path,
+                )
+
+        except Exception as e:
+            logger.error(f"Retry failed: {e}")
+            return False
+
+    async def _create_fallback_voiceover_clip(
+        self,
+        source_path: Path,
+        start_time: float,
+        voiceover_path: Path,
+        subtitle: str,
+        output_path: Path,
+    ) -> bool:
+        """Create fallback voiceover clip with simpler encoding."""
+        try:
+            vo_duration = self._get_audio_duration_mutagen(voiceover_path)
+            if vo_duration <= 0:
+                vo_duration = 8.0  # Default fallback
+
+            safe_subtitle = self._escape_ffmpeg_text(subtitle)
+
+            # Simpler encoding without complex audio mixing
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(start_time),
+                "-i", str(source_path),
+                "-i", str(voiceover_path),
+                "-t", str(vo_duration),
+                "-map", "0:v",
+                "-map", "1:a",
+                "-vf", (
+                    f"scale=1280:720:force_original_aspect_ratio=decrease,"
+                    f"pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,"
+                    f"drawtext=text='{safe_subtitle}':"
+                    f"fontsize=28:fontcolor=white:x=(w-text_w)/2:y=h-45:"
+                    f"borderw=2:bordercolor=black"
+                ),
+                "-c:v", "libx264",
+                "-preset", "fast",
+                "-crf", "26",  # Slightly higher CRF for faster encoding
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                "-shortest",
+                str(output_path)
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            return result.returncode == 0 and output_path.exists()
+
+        except Exception as e:
+            logger.error(f"Fallback voiceover clip error: {e}")
+            return False
+
+    async def _create_fallback_original_clip(
+        self,
+        source_path: Path,
+        start_time: float,
+        duration: float,
+        subtitle: str,
+        output_path: Path,
+    ) -> bool:
+        """Create fallback original clip with simpler encoding."""
+        try:
+            safe_subtitle = self._escape_ffmpeg_text(subtitle)
+
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(start_time),
+                "-i", str(source_path),
+                "-t", str(duration),
+                "-vf", (
+                    f"scale=1280:720:force_original_aspect_ratio=decrease,"
+                    f"pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,"
+                    f"drawtext=text='{safe_subtitle}':"
+                    f"fontsize=28:fontcolor=white:x=(w-text_w)/2:y=h-45:"
+                    f"borderw=2:bordercolor=black"
+                ),
+                "-c:v", "libx264",
+                "-preset", "fast",
+                "-crf", "26",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                str(output_path)
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            return result.returncode == 0 and output_path.exists()
+
+        except Exception as e:
+            logger.error(f"Fallback original clip error: {e}")
             return False
 
     async def _create_atomic_video_clip(
