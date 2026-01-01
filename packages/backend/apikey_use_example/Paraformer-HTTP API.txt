@@ -1,0 +1,18 @@
+参考文档：https://sophnet.com/docs/component/API.html#speech-to-text
+HTTP API 音频文件链接模式
+AUDIO_URL:https://www.bilibili.com/video/BV1mGB9BtER1/?spm_id_from=333.1007.tianma.4-2-12.click
+
+
+curl --location --request POST 'https://www.sophnet.com/api/open-apis/projects/easyllms/speechtotext/transcriptions' \
+--header "Authorization: Bearer $API_KEY" \
+--header "Content-Type: application/json" \
+--data-raw '{
+    "audio_url":"YOUR_AUDIO_URL"
+}'
+音频文件上传模式
+
+
+curl --location --request POST 'https://www.sophnet.com/api/open-apis/projects/easyllms/speechtotext/transcriptions' \
+--header "Authorization: Bearer $API_KEY" \
+--header "Content-Type: multipart/form-data" \
+-F "audio_file=@/path/to/your_audio_file.wav;type=audio/wav"

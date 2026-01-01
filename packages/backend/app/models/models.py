@@ -43,7 +43,7 @@ class Evidence(Base):
     chunk_type: Mapped[str] = mapped_column(String)  # 'asr' or 'frame'
     timestamp: Mapped[float] = mapped_column(Float)
     content: Mapped[str] = mapped_column(Text)
-    metadata: Mapped[dict] = mapped_column(JSON, default={})
+    meta_data: Mapped[dict] = mapped_column(JSON, default={})
 
 
 class AnalysisResult(Base):

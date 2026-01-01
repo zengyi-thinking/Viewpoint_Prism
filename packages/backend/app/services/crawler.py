@@ -3,7 +3,7 @@ import logging
 import subprocess
 import json
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from app.core import get_settings
 
@@ -155,3 +155,14 @@ class CrawlerService:
         except Exception as e:
             logger.error(f"Info extraction error: {e}")
             return {}
+
+
+# Singleton
+_crawler_service: Optional[CrawlerService] = None
+
+
+def get_crawler_service() -> CrawlerService:
+    global _crawler_service
+    if _crawler_service is None:
+        _crawler_service = CrawlerService()
+    return _crawler_service

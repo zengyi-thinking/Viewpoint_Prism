@@ -1,6 +1,6 @@
 """Creative video generation routes."""
 import uuid
-from typing import Dict, Any
+from typing import Dict, Any, List
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 

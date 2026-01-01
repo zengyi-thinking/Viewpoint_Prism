@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     # File Storage
     upload_dir: str = "data/uploads"
     temp_dir: str = "data/temp"
+    generated_dir: str = "data/generated"  # For creative video output
     max_upload_size: int = 1073741824  # 1GB
 
     # ChromaDB

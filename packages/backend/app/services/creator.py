@@ -21,6 +21,7 @@ class CreatorService:
         self.intel = get_intelligence_service()
         self.generated_dir = Path(settings.generated_dir)
         self.generated_dir.mkdir(parents=True, exist_ok=True)
+        self._tasks: Dict[str, Dict[str, Any]] = {}
 
     async def generate_debate(
         self,
@@ -267,6 +268,21 @@ class CreatorService:
         upload_dir = Path(settings.upload_dir)
         candidates = list(upload_dir.glob(f"{source_id}.*"))
         return str(candidates[0]) if candidates else None
+
+
+    def get_task_status(self, task_id: str) -> Dict[str, Any]:
+        """Get task status by ID."""
+        return self._tasks.get(task_id)
+
+    def create_task(self) -> str:
+        """Create a new task and return task ID."""
+        task_id = str(uuid.uuid4())[:8]
+        self._tasks[task_id] = {
+            "status": "pending",
+            "progress": 0,
+            "message": "任务已创建..."
+        }
+        return task_id
 
 
 # Singleton

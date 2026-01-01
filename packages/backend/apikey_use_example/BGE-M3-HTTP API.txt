@@ -1,0 +1,23 @@
+参考文档：https://sophnet.com/docs/component/API.html#embeddings
+
+# sample1
+curl --location --request POST 'https://www.sophnet.com/api/open-apis/projects/{projectId}/easyllms/embeddings' \
+--header "Authorization: Bearer $API_KEY" \
+--header "Content-Type: application/json" \
+--data-raw '{
+    "easyllm_id": "{YOUR_EASYLLM_ID}",
+    "input_texts": ["你好", "很高兴认识你"],
+    "dimensions": 1024
+}'
+
+# sample2
+curl --location --request POST 'https://www.sophnet.com/api/open-apis/projects/{projectId}/easyllms/embeddings' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer $API_KEY' \
+--data-raw '{
+    "model": "clip-embeddings",
+    "easyllm_id": "{YOUR_EASYLLM_ID}",
+    "input_texts": ["海滩上美丽的日落"],
+    "input_images": ["https://i.ibb.co/nQNGqL0/1beach1.jpg", "https://i.ibb.co/r5w8hG8/beach2.jpg", "iVBORw0KGgoAAAANSUhEUgAAABwAAAA4CAIAAABhUg/jAAAAMklEQVR4nO3MQREAMAgAoLkoFreTiSzhy4MARGe9bX99lEqlUqlUKpVKpVKpVCqVHksHaBwCA2cPf0cAAAAASUVORK5CYII="],
+    "dimensions": 1024
+}'

@@ -1,0 +1,14 @@
+项目的apikey:
+pA3uYXtPw3vV3sb3khjGTe8D5Jbi7Bm1Ohk6rGSyXParemqqszyOG5v5-onI62EkR1q-9pqjCgSC-3jQUoiETg
+
+项目的id:
+5U57ROU7TqfeNINZnKzYZ5
+
+ttseasyllmId:
+7RUpfZakZM7tIygXY5AGgA
+
+embeddings:
+6yXUAJl2jrJJLtgiKPq8vH
+
+stteasyllmId:
+x2u0AJ4lrwebvD95Znjgs
