@@ -222,6 +222,18 @@ export interface NetworkSearchRequest {
   limit?: number
 }
 
+// One-Pager Report types
+export interface OnePagerData {
+  headline: string
+  tldr: string
+  insights: string[]
+  conceptual_image: string | null
+  evidence_images: string[]
+  generated_at: string
+  source_id: string
+  video_title: string
+}
+
 // App state types
 export interface AppState {
   // Sources

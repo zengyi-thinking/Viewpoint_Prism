@@ -1,7 +1,7 @@
 import { useAppStore } from '@/stores/app-store'
 import { Play, Pause, Captions, Maximize, Terminal, MoreHorizontal, ArrowUp, Film, Volume2, VolumeX, Clock, FastForward, Gauge } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 
 const API_BASE = 'http://localhost:8000'
 
@@ -17,6 +17,7 @@ export function VideoPlayer() {
     setIsPlaying,
     activePlayer,
     setActivePlayer,
+    addMessage,
   } = useAppStore()
 
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -31,8 +32,86 @@ export function VideoPlayer() {
   const [dragProgress, setDragProgress] = useState(0)
   const [isHoveringProgress, setIsHoveringProgress] = useState(false)
 
+  // Context Bridge: User memory - track which time ranges user frequently seeks to
+  const seekMemoryRef = useRef<Map<number, number>>(new Map())  // timeRange -> count
+  const contextBridgeTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const lastSeekPositionRef = useRef<number>(0)
+
   const currentSource = sources.find((s) => s.id === currentSourceId)
   const videoUrl = currentSource ? `${API_BASE}${currentSource.url}` : null
+
+  // Format timestamp for display
+  const formatTimestamp = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+  }
+
+  // Context Bridge: Fetch bridging context and add as AI message in chat
+  const fetchAndShowContextBridge = useCallback(async (targetTimestamp: number, previousTimestamp?: number) => {
+    if (!currentSourceId) return
+
+    try {
+      const response = await fetch(`${API_BASE}/api/chat/context-bridge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_id: currentSourceId,
+          timestamp: targetTimestamp,
+          previous_timestamp: previousTimestamp,
+        }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+
+        // Check if user frequently seeks to this time range (user memory)
+        const timeRange = Math.floor(targetTimestamp / 30) * 30  // 30-second bins
+        const seekCount = seekMemoryRef.current.get(timeRange) || 0
+        seekMemoryRef.current.set(timeRange, seekCount + 1)
+
+        // Build the message with user memory hint
+        let memoryHint = ''
+        if (seekCount >= 3) {
+          memoryHint = `\n\n💡 记忆提示: 这已经是你第 ${seekCount} 次查看这个时间段的内容了，看来这里对你很重要。`
+        }
+
+        // Add as AI message in chat
+        addMessage({
+          id: `cb-${Date.now()}`,
+          role: 'ai',
+          content: `📍 **跳转到 ${data.timestamp_str}**\n\n${data.summary}${memoryHint}`,
+          timestamp: new Date(),
+        })
+      }
+    } catch (error) {
+      console.error('[Context Bridge] Fetch error:', error)
+    }
+  }, [currentSourceId, addMessage])
+
+  // Context Bridge: Trigger on seek with debounce
+  const triggerContextBridge = useCallback((targetTime: number) => {
+    const SEEK_THRESHOLD = 15  // Changed from 60 to 15 seconds
+    const DEBOUNCE_DELAY = 1000
+
+    const jumpDistance = Math.abs(targetTime - lastSeekPositionRef.current)
+
+    // Only trigger if jump is significant (more than 15 seconds)
+    if (jumpDistance < SEEK_THRESHOLD) {
+      return
+    }
+
+    // Clear any existing timer
+    if (contextBridgeTimerRef.current) {
+      clearTimeout(contextBridgeTimerRef.current)
+    }
+
+    // Set new timer (debounce)
+    contextBridgeTimerRef.current = setTimeout(() => {
+      fetchAndShowContextBridge(targetTime, lastSeekPositionRef.current)
+      lastSeekPositionRef.current = targetTime
+    }, DEBOUNCE_DELAY)
+  }, [fetchAndShowContextBridge])
 
   // Handle video source change
   useEffect(() => {
@@ -47,9 +126,22 @@ export function VideoPlayer() {
   // Sync currentTime from store to video (for seeking from other components)
   useEffect(() => {
     if (videoRef.current && Math.abs(videoRef.current.currentTime - currentTime) > 1) {
+      const oldTime = videoRef.current.currentTime
       videoRef.current.currentTime = currentTime
+      // Trigger Context Bridge for external seeks (e.g., from chat citations)
+      const jumpDistance = Math.abs(currentTime - oldTime)
+      if (jumpDistance >= 15) {
+        triggerContextBridge(currentTime)
+      }
     }
-  }, [currentTime])
+  }, [currentTime, triggerContextBridge])
+
+  // Initialize lastSeekPositionRef when video loads
+  useEffect(() => {
+    if (duration > 0 && lastSeekPositionRef.current === 0) {
+      lastSeekPositionRef.current = currentTime
+    }
+  }, [duration, currentTime])
 
   // Handle play state changes
   useEffect(() => {
@@ -113,9 +205,15 @@ export function VideoPlayer() {
 
   const seekToTime = (time: number) => {
     if (videoRef.current) {
+      const oldTime = videoRef.current.currentTime
       videoRef.current.currentTime = time
       setCurrentTime(time)
       setProgress((time / duration) * 100)
+      // Trigger Context Bridge for significant seeks (15+ seconds)
+      const jumpDistance = Math.abs(time - oldTime)
+      if (jumpDistance >= 15) {
+        triggerContextBridge(time)
+      }
     }
   }
 
@@ -125,6 +223,14 @@ export function VideoPlayer() {
 
   const handleDragEnd = () => {
     setIsDragging(false)
+    // Note: Context Bridge is now triggered by seekToTime(), which is called
+    // when the user clicks on the progress bar. For dragging, we trigger here.
+    if (videoRef.current && lastSeekPositionRef.current !== videoRef.current.currentTime) {
+      const jumpDistance = Math.abs(videoRef.current.currentTime - lastSeekPositionRef.current)
+      if (jumpDistance >= 15) {
+        triggerContextBridge(videoRef.current.currentTime)
+      }
+    }
   }
 
   useEffect(() => {
@@ -178,6 +284,15 @@ export function VideoPlayer() {
     const secs = Math.floor(seconds % 60)
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
   }
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (contextBridgeTimerRef.current) {
+        clearTimeout(contextBridgeTimerRef.current)
+      }
+    }
+  }, [])
 
   // Get preview time based on drag position
   const getPreviewTime = () => {
@@ -239,6 +354,8 @@ export function VideoPlayer() {
           </div>
         </div>
       )}
+
+      {/* Context Bridge is now shown as AI messages in the chat panel */}
 
       {/* Controls Overlay - Always visible at bottom */}
       {videoUrl && (

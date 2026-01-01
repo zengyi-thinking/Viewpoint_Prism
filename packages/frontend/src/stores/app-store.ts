@@ -22,6 +22,7 @@ import type {
   DirectorTask,
   Persona,
   NetworkSearchTask,
+  OnePagerData,
 } from '@/types'
 
 // API base URL
@@ -145,6 +146,12 @@ interface AppStore {
   startNetworkSearch: (platform: string, keyword: string, limit?: number) => Promise<string | null>
   pollNetworkSearchTask: (taskId: string) => Promise<NetworkSearchTask | null>
   setNetworkSearchTask: (task: NetworkSearchTask | null) => void
+
+  // === One-Pager Report Actions ===
+  onePagerData: OnePagerData | null
+  isGeneratingOnePager: boolean
+  fetchOnePager: (sourceId: string, useCache?: boolean) => Promise<OnePagerData | null>
+  setOnePagerData: (data: OnePagerData | null) => void
 }
 
 // Empty initial state - no mock data
@@ -212,6 +219,9 @@ export const useAppStore = create<AppStore>()(
         selectedPersona: 'pro' as Persona,
         // Phase 11: Network Search state
         networkSearchTask: null,
+        // One-Pager Report state
+        onePagerData: null,
+        isGeneratingOnePager: false,
 
         // === Source Actions ===
         addSource: (source) =>
@@ -1051,6 +1061,40 @@ export const useAppStore = create<AppStore>()(
 
         setNetworkSearchTask: (task: NetworkSearchTask | null) =>
           set({ networkSearchTask: task }),
+
+        // === One-Pager Report Actions ===
+        fetchOnePager: async (sourceId: string, useCache: boolean = true) => {
+          set({ isGeneratingOnePager: true })
+
+          try {
+            const response = await fetch(`${API_BASE}/analysis/one-pager`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                source_id: sourceId,
+                use_cache: useCache,
+              }),
+            })
+
+            if (response.ok) {
+              const data: OnePagerData = await response.json()
+              set({ onePagerData: data, isGeneratingOnePager: false })
+              return data
+            } else {
+              const errorData = await response.json().catch(() => ({ detail: '请求失败' }))
+              console.error('Failed to fetch one-pager:', errorData)
+              set({ isGeneratingOnePager: false })
+              return null
+            }
+          } catch (error) {
+            console.error('One-pager fetch error:', error)
+            set({ isGeneratingOnePager: false })
+            return null
+          }
+        },
+
+        setOnePagerData: (data: OnePagerData | null) =>
+          set({ onePagerData: data }),
       }),
       {
         name: 'viewpoint-prism-storage',

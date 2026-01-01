@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import * as echarts from 'echarts'
 import type { AnalysisTab, Conflict, DebateTask, GraphNode, DirectorTask, Persona, StoryboardFrame } from '@/types'
 import { FeatureCard } from '@/components/ui/FeatureCard'
+import { OnePager } from '@/components/ui/OnePager'
 
 // Persona configurations for UI
 const PERSONAS: Array<{ id: Persona; name: string; emoji: string; description: string }> = [
@@ -1395,33 +1396,13 @@ function TimelineView() {
   )
 }
 
-// Report View (New - placeholder for future deep analysis text)
+// Report View (One-Pager Executive Summary)
 function ReportView() {
-  const { language } = useAppStore()
-
-  const t = {
-    zh: {
-      title: '深度报告',
-      subtitle: '查看详细的文字分析与摘要',
-      comingSoon: '即将推出',
-    },
-    en: {
-      title: 'Deep Report',
-      subtitle: 'View detailed text analysis and summaries',
-      comingSoon: 'Coming Soon',
-    },
-  }
+  const { language, currentSourceId } = useAppStore()
 
   return (
-    <div className="absolute inset-0 overflow-y-auto scroller fade-in p-6">
-      <div className="text-center py-20">
-        <FileText className="w-16 h-16 text-zinc-600 mx-auto mb-4" />
-        <h2 className="text-xl font-bold text-white mb-2">{t[language].title}</h2>
-        <p className="text-sm text-zinc-400 mb-4">{t[language].subtitle}</p>
-        <span className="text-xs text-zinc-500 bg-zinc-800/50 px-4 py-2 rounded-full border border-zinc-700/50">
-          {t[language].comingSoon}
-        </span>
-      </div>
+    <div className="absolute inset-0 overflow-hidden bg-[#121214]">
+      <OnePager sourceId={currentSourceId} language={language} />
     </div>
   )
 }
