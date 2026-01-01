@@ -12,7 +12,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { Loader2, Play, Pause, X, RefreshCw, BookOpen, Clock, Copy, Check, Download } from 'lucide-react'
+import { Loader2, Play, X, RefreshCw, BookOpen, Clock, Copy, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/app-store'
 import type { WebtoonTask, WebtoonPanel, BlogSection } from '@/types'
@@ -25,12 +25,10 @@ const API_BASE = 'http://localhost:8000/api'
 function MagicImage({
   panel,
   onPlayVideo,
-  isVideoPlaying,
   videoRef,
 }: {
   panel: WebtoonPanel
   onPlayVideo: (panel: WebtoonPanel) => void
-  isVideoPlaying: boolean
   videoRef: React.RefObject<HTMLVideoElement>
 }) {
   const [isFlipped, setIsFlipped] = useState(false)
@@ -136,8 +134,9 @@ export function BlogPanel() {
   const [maxPanels, setMaxPanels] = useState(6)
   const [copied, setCopied] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
-  const [playingPanel, setPlayingPanel] = useState<WebtoonPanel | null>(null)
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [_playingPanel, setPlayingPanel] = useState<WebtoonPanel | null>(null)
+  const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Get current source
   const currentSource = sources.find(s => s.id === currentSourceId)
@@ -310,7 +309,6 @@ export function BlogPanel() {
             key={index}
             panel={panel}
             onPlayVideo={handlePlayVideo}
-            isVideoPlaying={playingPanel?.panel_number === panel.panel_number}
             videoRef={videoRef}
           />
         )

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useAppStore } from '@/stores/app-store'
-import { Zap, AlertTriangle, Sparkles, RefreshCw, Loader2, Film, Download, Play, Pause, X, Video, BookOpen, Swords, Footprints, Check, Clapperboard, ArrowLeft, FileText, Scissors, Image, Grid3X3, Palette } from 'lucide-react'
+import { Zap, AlertTriangle, Sparkles, RefreshCw, Loader2, Film, Download, Play, Pause, X, Video, BookOpen, Swords, Footprints, Check, Clapperboard, ArrowLeft, FileText, Image, Grid3X3 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import * as echarts from 'echarts'
 import type { Conflict, DebateTask, GraphNode, DirectorTask, Persona } from '@/types'
@@ -848,8 +848,8 @@ function EntityCard() {
   )
 }
 
-// Graph View with ECharts - Enhanced for Phase 7
-function GraphView() {
+// Graph View with ECharts - Enhanced for Phase 7 (Reserved for future use)
+export function _GraphView() {
   const chartRef = useRef<HTMLDivElement>(null)
   const chartInstance = useRef<echarts.ECharts | null>(null)
   const {

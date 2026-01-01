@@ -82,7 +82,7 @@ export interface ChatMessage {
 export type PanelPosition = 'left' | 'bottom' | 'right'
 export type AnalysisTab = 'conflicts' | 'graph' | 'timeline'
 export type Language = 'zh' | 'en'
-export type ActivePlayer = 'main' | 'debate' | 'supercut' | 'digest' | 'director' | null
+export type ActivePlayer = 'main' | 'debate' | 'supercut' | 'digest' | 'director' | 'nebula' | null
 
 // API Response types
 export interface SourceListResponse {

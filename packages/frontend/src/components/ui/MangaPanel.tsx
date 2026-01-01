@@ -11,7 +11,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { Loader2, Play, Pause, X, RefreshCw, Palette, Clock, ChevronDown } from 'lucide-react'
+import { Loader2, Play, X, RefreshCw, Palette, Clock, ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/app-store'
 import type { WebtoonTask, WebtoonPanel } from '@/types'
@@ -24,7 +24,7 @@ const API_BASE = 'http://localhost:8000/api'
 function MagicFrame({
   panel,
   onPlayVideo,
-  isVideoPlaying,
+  isVideoPlaying: _isVideoPlaying,
   videoRef,
 }: {
   panel: WebtoonPanel
@@ -164,7 +164,7 @@ export function MangaPanel() {
   const [maxPanels, setMaxPanels] = useState(8)
   const videoRef = useRef<HTMLVideoElement>(null)
   const [playingPanel, setPlayingPanel] = useState<WebtoonPanel | null>(null)
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const pollIntervalRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Get current source
   const currentSource = sources.find(s => s.id === currentSourceId)
