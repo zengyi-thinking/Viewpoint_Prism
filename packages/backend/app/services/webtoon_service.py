@@ -74,6 +74,11 @@ class WebtoonService:
             # Cinematic Blog fields
             "blog_title": "",
             "blog_sections": [],  # List of {type: 'text'|'panel', content/panel_index}
+            # Audio Blog fields (Phase 14.5)
+            "audio_status": "pending",  # pending | generating | completed | error
+            "audio_progress": 0,
+            "audio_message": "",
+            "audio_url": None,
         }
         return task_id
 
@@ -265,7 +270,7 @@ class WebtoonService:
 
             logger.info(f"Blog narrative generated: {blog_title}, {len(blog_sections)} sections")
 
-            # Complete
+            # Complete blog generation (audio will be generated in background)
             self._update_task(
                 task_id,
                 status="completed",
@@ -278,6 +283,11 @@ class WebtoonService:
             )
 
             logger.info(f"Cinematic blog completed: {len(panels)} panels for source {source_id}")
+
+            # Step 5: Generate audio in background (async fire-and-forget)
+            asyncio.create_task(
+                self.generate_blog_audio(task_id, blog_sections, blog_title)
+            )
 
         except Exception as e:
             logger.error(f"Webtoon generation failed: {e}")
@@ -715,3 +725,295 @@ class WebtoonService:
                 sections.insert(insert_pos, {"type": "panel", "panel_index": i})
 
         return title, sections
+
+    # ========================================================================
+    # Audio Blog (Podcasting) - Phase 14.5
+    # ========================================================================
+
+    async def generate_blog_audio(
+        self,
+        task_id: str,
+        blog_sections: List[Dict],
+        blog_title: str = "",
+    ) -> Optional[str]:
+        """
+        Generate podcast audio for the blog content using TTS.
+
+        Args:
+            task_id: Task identifier for audio file naming
+            blog_sections: List of {type: 'text'|'panel', content/panel_index}
+            blog_title: Blog title (included at the beginning of audio)
+
+        Returns:
+            URL path to the generated audio file, or None on failure
+        """
+        try:
+            # Update task status
+            self._update_task(
+                task_id,
+                audio_status="generating",
+                audio_progress=0,
+                audio_message="🎙️ AI is recording the podcast...",
+            )
+
+            # Step 1: Extract all text content
+            text_parts = []
+
+            # Add title at the beginning
+            if blog_title:
+                text_parts.append(blog_title)
+                text_parts.append("")  # Pause after title
+
+            for section in blog_sections:
+                if section.get("type") == "text" and section.get("content"):
+                    content = section["content"].strip()
+                    # Clean markdown headings for speech
+                    content = self._clean_text_for_speech(content)
+                    if content:
+                        text_parts.append(content)
+
+            if not text_parts:
+                logger.warning("No text content found for audio generation")
+                return None
+
+            full_text = "\n\n".join(text_parts)
+            logger.info(f"Blog audio: {len(full_text)} characters to synthesize")
+
+            # Step 2: Split into segments if too long (>500 chars per segment)
+            MAX_SEGMENT_LENGTH = 500
+            segments = self._split_text_for_tts(full_text, MAX_SEGMENT_LENGTH)
+            logger.info(f"Split into {len(segments)} audio segments")
+
+            # Step 3: Generate audio for each segment
+            audio_dir = Path(settings.temp_dir) / "blog_audio"
+            audio_dir.mkdir(parents=True, exist_ok=True)
+
+            segment_paths = []
+            total_segments = len(segments)
+
+            for i, segment_text in enumerate(segments):
+                segment_path = audio_dir / f"{task_id}_seg_{i:02d}.mp3"
+
+                self._update_task(
+                    task_id,
+                    audio_status="generating",
+                    audio_progress=int((i / total_segments) * 80),
+                    audio_message=f"🎙️ Recording segment {i + 1}/{total_segments}...",
+                )
+
+                try:
+                    # Use SophNet CosyVoice with professional narrator voice
+                    await self.sophnet.generate_speech_to_file(
+                        text=segment_text,
+                        output_path=segment_path,
+                        voice="longxiaochun",  # Professional narrator voice
+                    )
+
+                    if segment_path.exists() and segment_path.stat().st_size > 0:
+                        segment_paths.append(segment_path)
+                        logger.info(f"Generated audio segment {i + 1}: {segment_path}")
+                    else:
+                        logger.warning(f"Empty audio segment {i + 1}")
+
+                except Exception as e:
+                    logger.error(f"Failed to generate segment {i + 1}: {e}")
+                    # Continue with other segments
+
+            if not segment_paths:
+                logger.error("No audio segments generated")
+                self._update_task(
+                    task_id,
+                    audio_status="error",
+                    audio_message="Audio generation failed",
+                )
+                return None
+
+            # Step 4: Concatenate segments if multiple
+            final_audio_path = audio_dir / f"{task_id}_podcast.mp3"
+
+            self._update_task(
+                task_id,
+                audio_status="generating",
+                audio_progress=85,
+                audio_message="🎬 Finalizing podcast audio...",
+            )
+
+            if len(segment_paths) == 1:
+                # Single segment, just rename
+                segment_paths[0].rename(final_audio_path)
+            else:
+                # Multiple segments, concatenate with FFmpeg
+                success = await self._concatenate_audio_segments(
+                    segment_paths, final_audio_path
+                )
+                if not success:
+                    logger.error("Failed to concatenate audio segments")
+                    self._update_task(
+                        task_id,
+                        audio_status="error",
+                        audio_message="Audio concatenation failed",
+                    )
+                    return None
+
+                # Cleanup segment files
+                for seg_path in segment_paths:
+                    try:
+                        seg_path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+
+            # Step 5: Return audio URL
+            audio_url = f"/static/temp/blog_audio/{final_audio_path.name}"
+
+            self._update_task(
+                task_id,
+                audio_status="completed",
+                audio_progress=100,
+                audio_message="🎧 Podcast ready!",
+                audio_url=audio_url,
+            )
+
+            logger.info(f"Blog audio generated: {audio_url}")
+            return audio_url
+
+        except Exception as e:
+            logger.error(f"Blog audio generation failed: {e}")
+            self._update_task(
+                task_id,
+                audio_status="error",
+                audio_message=f"Audio generation failed: {str(e)}",
+            )
+            return None
+
+    def _clean_text_for_speech(self, text: str) -> str:
+        """Clean text content for TTS synthesis."""
+        import re
+
+        # Remove markdown headings (## Title -> Title)
+        text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+
+        # Remove markdown bold/italic markers
+        text = re.sub(r'\*{1,2}([^*]+)\*{1,2}', r'\1', text)
+        text = re.sub(r'_{1,2}([^_]+)_{1,2}', r'\1', text)
+
+        # Remove markdown links [text](url) -> text
+        text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+
+        # Remove image references
+        text = re.sub(r'!\[([^\]]*)\]\([^)]+\)', '', text)
+
+        # Remove HTML tags
+        text = re.sub(r'<[^>]+>', '', text)
+
+        # Normalize whitespace
+        text = re.sub(r'\s+', ' ', text).strip()
+
+        return text
+
+    def _split_text_for_tts(
+        self,
+        text: str,
+        max_length: int = 500,
+    ) -> List[str]:
+        """
+        Split text into segments suitable for TTS.
+        Respects sentence boundaries where possible.
+        """
+        if len(text) <= max_length:
+            return [text]
+
+        segments = []
+        paragraphs = text.split('\n\n')
+
+        current_segment = ""
+
+        for para in paragraphs:
+            para = para.strip()
+            if not para:
+                continue
+
+            # If paragraph alone exceeds max, split by sentences
+            if len(para) > max_length:
+                sentences = self._split_into_sentences(para)
+                for sentence in sentences:
+                    if len(current_segment) + len(sentence) + 1 <= max_length:
+                        current_segment += (" " if current_segment else "") + sentence
+                    else:
+                        if current_segment:
+                            segments.append(current_segment.strip())
+                        # If single sentence exceeds max, split by chars
+                        if len(sentence) > max_length:
+                            # Split at max_length boundaries
+                            for i in range(0, len(sentence), max_length):
+                                segments.append(sentence[i:i + max_length].strip())
+                            current_segment = ""
+                        else:
+                            current_segment = sentence
+            else:
+                # Try to add paragraph to current segment
+                if len(current_segment) + len(para) + 2 <= max_length:
+                    current_segment += ("\n\n" if current_segment else "") + para
+                else:
+                    if current_segment:
+                        segments.append(current_segment.strip())
+                    current_segment = para
+
+        # Don't forget the last segment
+        if current_segment:
+            segments.append(current_segment.strip())
+
+        return segments
+
+    def _split_into_sentences(self, text: str) -> List[str]:
+        """Split text into sentences."""
+        import re
+        # Split on sentence-ending punctuation followed by space or end
+        sentences = re.split(r'(?<=[。！？.!?])\s*', text)
+        return [s.strip() for s in sentences if s.strip()]
+
+    async def _concatenate_audio_segments(
+        self,
+        segment_paths: List[Path],
+        output_path: Path,
+    ) -> bool:
+        """Concatenate multiple audio segments using FFmpeg."""
+        try:
+            # Create concat list file
+            concat_list_path = output_path.parent / f"{output_path.stem}_concat.txt"
+
+            with open(concat_list_path, "w", encoding="utf-8") as f:
+                for seg_path in segment_paths:
+                    # Use forward slashes and escape single quotes
+                    safe_path = str(seg_path).replace("\\", "/").replace("'", "'\\''")
+                    f.write(f"file '{safe_path}'\n")
+
+            # FFmpeg concat demuxer
+            cmd = [
+                "ffmpeg", "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", str(concat_list_path),
+                "-c", "copy",
+                str(output_path)
+            ]
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                timeout=60,
+            )
+
+            # Cleanup concat list
+            concat_list_path.unlink(missing_ok=True)
+
+            if result.returncode == 0 and output_path.exists():
+                logger.info(f"Audio concatenation successful: {output_path}")
+                return True
+            else:
+                stderr = result.stderr.decode('utf-8', errors='replace')
+                logger.error(f"FFmpeg concat failed: {stderr}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Audio concatenation error: {e}")
+            return False

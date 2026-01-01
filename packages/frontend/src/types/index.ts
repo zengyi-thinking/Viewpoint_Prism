@@ -279,6 +279,11 @@ export interface WebtoonTask {
   blog_title?: string
   blog_sections?: BlogSection[]
   error?: string
+  // Audio Blog fields (Phase 14.5)
+  audio_status?: 'pending' | 'generating' | 'completed' | 'error'
+  audio_progress?: number
+  audio_message?: string
+  audio_url?: string
 }
 
 // App state types

@@ -2,6 +2,7 @@
  * BlogPanel - Cinematic Blog Reader
  *
  * Phase 14: Transform video into editorial-style visual articles.
+ * Phase 14.5: Audio Blog (Podcasting) - Listen to your blog!
  * Medium/Substack inspired design with manga illustrations.
  *
  * Features:
@@ -9,15 +10,213 @@
  * - Serif typography for body text
  * - Full-width manga panels with click-to-play
  * - Markdown export (Copy to Clipboard)
+ * - Podcast player with speed control
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { Loader2, Play, X, RefreshCw, BookOpen, Clock, Copy, Check } from 'lucide-react'
+import { Loader2, Play, Pause, X, RefreshCw, BookOpen, Clock, Copy, Check, Headphones, Volume2, VolumeX } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/app-store'
 import type { WebtoonTask, WebtoonPanel, BlogSection } from '@/types'
 
 const API_BASE = 'http://localhost:8000/api'
+
+/**
+ * PodcastPlayer Component - Sticky audio player for blog narration
+ */
+function PodcastPlayer({
+  audioUrl,
+  audioStatus,
+  audioMessage,
+  audioProgress,
+}: {
+  audioUrl?: string
+  audioStatus?: 'pending' | 'generating' | 'completed' | 'error'
+  audioMessage?: string
+  audioProgress?: number
+}) {
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [isMuted, setIsMuted] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [playbackRate, setPlaybackRate] = useState(1.0)
+
+  const speedOptions = [0.75, 1.0, 1.25, 1.5, 2.0]
+
+  // Toggle play/pause
+  const togglePlay = useCallback(() => {
+    if (!audioRef.current) return
+
+    if (isPlaying) {
+      audioRef.current.pause()
+    } else {
+      audioRef.current.play()
+    }
+    setIsPlaying(!isPlaying)
+  }, [isPlaying])
+
+  // Toggle mute
+  const toggleMute = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.muted = !isMuted
+      setIsMuted(!isMuted)
+    }
+  }, [isMuted])
+
+  // Change playback speed
+  const cycleSpeed = useCallback(() => {
+    const currentIndex = speedOptions.indexOf(playbackRate)
+    const nextIndex = (currentIndex + 1) % speedOptions.length
+    const newRate = speedOptions[nextIndex]
+    setPlaybackRate(newRate)
+    if (audioRef.current) {
+      audioRef.current.playbackRate = newRate
+    }
+  }, [playbackRate])
+
+  // Seek to position
+  const handleSeek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!audioRef.current || !duration) return
+
+    const rect = e.currentTarget.getBoundingClientRect()
+    const percent = (e.clientX - rect.left) / rect.width
+    const newTime = percent * duration
+    audioRef.current.currentTime = newTime
+    setCurrentTime(newTime)
+  }, [duration])
+
+  // Format time as MM:SS
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }
+
+  // Audio is ready
+  const isReady = audioStatus === 'completed' && audioUrl
+
+  // Generating state
+  const isGenerating = audioStatus === 'generating'
+
+  // Show nothing if pending/no audio
+  if (audioStatus === 'pending' && !audioUrl) {
+    return null
+  }
+
+  return (
+    <div className="bg-gradient-to-r from-amber-900/20 to-orange-900/20 border border-amber-800/30 rounded-xl p-3 mb-4">
+      {isReady ? (
+        <>
+          {/* Hidden audio element */}
+          <audio
+            ref={audioRef}
+            src={`http://localhost:8000${audioUrl}`}
+            onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
+            onLoadedMetadata={() => setDuration(audioRef.current?.duration || 0)}
+            onEnded={() => setIsPlaying(false)}
+            onPlay={() => setIsPlaying(true)}
+            onPause={() => setIsPlaying(false)}
+          />
+
+          <div className="flex items-center gap-3">
+            {/* Podcast icon */}
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center flex-shrink-0">
+              <Headphones className="w-5 h-5 text-white" />
+            </div>
+
+            {/* Controls */}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-2">
+                {/* Play/Pause */}
+                <button
+                  onClick={togglePlay}
+                  className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
+                >
+                  {isPlaying ? (
+                    <Pause className="w-4 h-4 text-white" />
+                  ) : (
+                    <Play className="w-4 h-4 text-white ml-0.5" />
+                  )}
+                </button>
+
+                {/* Progress bar */}
+                <div
+                  onClick={handleSeek}
+                  className="flex-1 h-2 bg-zinc-700 rounded-full cursor-pointer overflow-hidden group"
+                >
+                  <div
+                    className="h-full bg-gradient-to-r from-amber-500 to-orange-500 transition-all group-hover:opacity-80"
+                    style={{ width: duration ? `${(currentTime / duration) * 100}%` : '0%' }}
+                  />
+                </div>
+
+                {/* Time display */}
+                <span className="text-xs text-zinc-400 font-mono min-w-[70px] text-right">
+                  {formatTime(currentTime)} / {formatTime(duration)}
+                </span>
+              </div>
+
+              {/* Secondary controls */}
+              <div className="flex items-center gap-3">
+                {/* Speed control */}
+                <button
+                  onClick={cycleSpeed}
+                  className="px-2 py-0.5 text-xs font-bold text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 rounded transition-colors"
+                >
+                  {playbackRate}x
+                </button>
+
+                {/* Mute */}
+                <button
+                  onClick={toggleMute}
+                  className="p-1 text-zinc-400 hover:text-white transition-colors"
+                >
+                  {isMuted ? (
+                    <VolumeX className="w-4 h-4" />
+                  ) : (
+                    <Volume2 className="w-4 h-4" />
+                  )}
+                </button>
+
+                {/* Label */}
+                <span className="text-xs text-zinc-500">🎙️ AI Podcast</span>
+              </div>
+            </div>
+          </div>
+        </>
+      ) : isGenerating ? (
+        /* Generating state */
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-900/50 to-orange-900/50 flex items-center justify-center flex-shrink-0">
+            <Loader2 className="w-5 h-5 text-amber-500 animate-spin" />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm text-amber-400 font-medium">
+              {audioMessage || '🎙️ AI is recording the podcast...'}
+            </p>
+            <div className="mt-1 h-1.5 bg-zinc-700 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-amber-500 to-orange-500 transition-all"
+                style={{ width: `${audioProgress || 0}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      ) : audioStatus === 'error' ? (
+        /* Error state */
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-red-900/30 flex items-center justify-center flex-shrink-0">
+            <Headphones className="w-5 h-5 text-red-400" />
+          </div>
+          <p className="text-sm text-red-400">
+            {audioMessage || 'Audio generation failed'}
+          </p>
+        </div>
+      ) : null}
+    </div>
+  )
+}
 
 /**
  * MagicImage Component - Manga panel with video toggle
@@ -459,6 +658,14 @@ export function BlogPanel() {
               </div>
               <div className="mt-6 w-16 h-1 bg-gradient-to-r from-amber-500 to-orange-500 mx-auto rounded-full" />
             </header>
+
+            {/* Podcast Player */}
+            <PodcastPlayer
+              audioUrl={task.audio_url}
+              audioStatus={task.audio_status}
+              audioMessage={task.audio_message}
+              audioProgress={task.audio_progress}
+            />
 
             {/* Article Sections */}
             <div className="space-y-6">
