@@ -1,290 +1,657 @@
-import { useEffect, useRef } from 'react'
 import { useAppStore } from '@/stores/app-store'
-import { Play, Pause, Volume2, Maximize, MessageCircle, X, Download } from 'lucide-react'
+import { Play, Pause, Captions, Maximize, Terminal, MoreHorizontal, ArrowUp, Film, Volume2, VolumeX, Clock, FastForward, Gauge } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useState, useRef, useEffect } from 'react'
 
-export function StagePanel() {
+const API_BASE = 'http://localhost:8000'
+
+const PLAYBACK_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2]
+
+export function VideoPlayer() {
   const {
+    sources,
     currentSourceId,
     currentTime,
     isPlaying,
-    activePlayer,
-    sources,
-    messages,
-    isChatting,
-    debateTasks,
-    directorTasks,
-    supercutTasks,
-    digestTask,
     setCurrentTime,
     setIsPlaying,
+    activePlayer,
     setActivePlayer,
-    sendChatMessage,
-    setCurrentSource
   } = useAppStore()
 
-  const mainVideoRef = useRef<HTMLVideoElement>(null)
-  const creativeVideoRef = useRef<HTMLVideoElement>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const progressBarRef = useRef<HTMLDivElement>(null)
+  const [duration, setDuration] = useState(0)
+  const [progress, setProgress] = useState(0)
+  const [isHovering, setIsHovering] = useState(false)
+  const [isMuted, setIsMuted] = useState(false)
+  const [playbackSpeed, setPlaybackSpeed] = useState(1)
+  const [showSpeedMenu, setShowSpeedMenu] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+  const [dragProgress, setDragProgress] = useState(0)
+  const [isHoveringProgress, setIsHoveringProgress] = useState(false)
 
-  const currentSource = sources.find(s => s.id === currentSourceId)
+  const currentSource = sources.find((s) => s.id === currentSourceId)
+  const videoUrl = currentSource ? `${API_BASE}${currentSource.url}` : null
 
-  // Get current creative video URL based on active player
-  const getCreativeVideoUrl = (): string | null => {
-    switch (activePlayer) {
-      case 'debate':
-        const debateTask = Object.values(debateTasks).find(t => t.status === 'completed')
-        return debateTask?.video_url || null
-      case 'director':
-        const directorTask = Object.values(directorTasks).find(t => t.status === 'completed')
-        return directorTask?.video_url || null
-      case 'supercut':
-        const supercutTask = Object.values(supercutTasks).find(t => t.status === 'completed')
-        return supercutTask?.video_url || null
-      case 'digest':
-        return digestTask?.status === 'completed' ? digestTask.video_url : null
-      default:
-        return null
+  // Handle video source change
+  useEffect(() => {
+    if (videoRef.current && videoUrl) {
+      videoRef.current.load()
+      if (currentTime > 0) {
+        videoRef.current.currentTime = currentTime
+      }
+    }
+  }, [currentSourceId, videoUrl])
+
+  // Sync currentTime from store to video (for seeking from other components)
+  useEffect(() => {
+    if (videoRef.current && Math.abs(videoRef.current.currentTime - currentTime) > 1) {
+      videoRef.current.currentTime = currentTime
+    }
+  }, [currentTime])
+
+  // Handle play state changes
+  useEffect(() => {
+    if (videoRef.current) {
+      if (isPlaying) {
+        videoRef.current.play().catch(() => setIsPlaying(false))
+      } else {
+        videoRef.current.pause()
+      }
+    }
+  }, [isPlaying, setIsPlaying])
+
+  // Pause when another player becomes active
+  useEffect(() => {
+    if (activePlayer !== 'main' && activePlayer !== null && isPlaying) {
+      setIsPlaying(false)
+    }
+  }, [activePlayer, isPlaying, setIsPlaying])
+
+  // Handle playback speed change
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.playbackRate = playbackSpeed
+    }
+  }, [playbackSpeed])
+
+  const handleTimeUpdate = () => {
+    if (videoRef.current && !isDragging) {
+      const time = videoRef.current.currentTime
+      setProgress((time / duration) * 100)
+      setCurrentTime(time)
     }
   }
 
-  const creativeVideoUrl = getCreativeVideoUrl()
+  const handleLoadedMetadata = () => {
+    if (videoRef.current) {
+      setDuration(videoRef.current.duration)
+    }
+  }
 
-  const togglePlay = (player: 'main' | 'creative') => {
-    const video = player === 'main' ? mainVideoRef.current : creativeVideoRef.current
-    if (video) {
-      if (video.paused) {
-        video.play()
-        if (player === 'main') setIsPlaying(true)
+  const handleProgressClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (videoRef.current) {
+      const rect = e.currentTarget.getBoundingClientRect()
+      const pos = (e.clientX - rect.left) / rect.width
+      const newTime = pos * duration
+      seekToTime(newTime)
+    }
+  }
+
+  const handleProgressDrag = (e: React.MouseEvent<HTMLDivElement> | MouseEvent) => {
+    if (!progressBarRef.current) return
+    const rect = progressBarRef.current.getBoundingClientRect()
+    const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+    setDragProgress(pos * 100)
+    const newTime = pos * duration
+    setCurrentTime(newTime)
+    if (videoRef.current) {
+      videoRef.current.currentTime = newTime
+    }
+  }
+
+  const seekToTime = (time: number) => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = time
+      setCurrentTime(time)
+      setProgress((time / duration) * 100)
+    }
+  }
+
+  const handleDragStart = () => {
+    setIsDragging(true)
+  }
+
+  const handleDragEnd = () => {
+    setIsDragging(false)
+  }
+
+  useEffect(() => {
+    if (isDragging) {
+      const handleMouseMove = (e: MouseEvent) => handleProgressDrag(e)
+      const handleMouseUp = () => handleDragEnd()
+
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove)
+        document.removeEventListener('mouseup', handleMouseUp)
+      }
+    }
+  }, [isDragging, duration])
+
+  const togglePlay = () => {
+    if (!isPlaying) {
+      setActivePlayer('main')
+    }
+    setIsPlaying(!isPlaying)
+  }
+
+  const toggleMute = () => {
+    if (videoRef.current) {
+      videoRef.current.muted = !isMuted
+      setIsMuted(!isMuted)
+    }
+  }
+
+  const toggleFullscreen = () => {
+    if (videoRef.current) {
+      if (document.fullscreenElement) {
+        document.exitFullscreen()
       } else {
-        video.pause()
-        if (player === 'main') setIsPlaying(false)
+        videoRef.current.requestFullscreen()
       }
     }
   }
 
+  const cycleSpeed = () => {
+    const currentIndex = PLAYBACK_SPEEDS.indexOf(playbackSpeed)
+    const nextIndex = (currentIndex + 1) % PLAYBACK_SPEEDS.length
+    setPlaybackSpeed(PLAYBACK_SPEEDS[nextIndex])
+  }
+
   const formatTime = (seconds: number) => {
+    if (!isFinite(seconds)) return '00:00'
     const mins = Math.floor(seconds / 60)
     const secs = Math.floor(seconds % 60)
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
   }
 
-  const handleTimeUpdate = (video: HTMLVideoElement) => {
-    setCurrentTime(video.currentTime)
-  }
-
-  const handleSeek = (e: React.MouseEvent<HTMLDivElement>, player: 'main' | 'creative') => {
-    const progressBar = e.currentTarget
-    const rect = progressBar.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const percentage = x / rect.width
-
-    const video = player === 'main' ? mainVideoRef.current : creativeVideoRef.current
-    const duration = player === 'main' ? (currentSource?.duration || 0) : (creativeVideoRef.current?.duration || 0)
-
-    if (video && duration) {
-      video.currentTime = percentage * duration
+  // Get preview time based on drag position
+  const getPreviewTime = () => {
+    if (isDragging) {
+      return (dragProgress / 100) * duration
     }
-  }
-
-  const getActiveVideoRef = () => {
-    return activePlayer === 'main' ? mainVideoRef : creativeVideoRef
+    return currentTime
   }
 
   return (
-    <div className="h-full flex flex-col bg-[#09090b]">
-      {/* Video Player Area */}
-      <div className="flex-1 flex items-center justify-center relative">
-        {/* Main Video Player */}
-        {activePlayer === 'main' ? (
-          currentSource ? (
-            <div className="w-full h-full flex flex-col">
-              <video
-                ref={mainVideoRef}
-                data-source-id={currentSource.id}
-                src={currentSource.url}
-                className="w-full h-full object-contain"
-                onTimeUpdate={(e) => handleTimeUpdate(e.target as HTMLVideoElement)}
-                onPlay={() => setIsPlaying(true)}
-                onPause={() => setIsPlaying(false)}
-              />
+    <div
+      className="flex-1 floating-panel relative group flex flex-col justify-center items-center overflow-hidden bg-black"
+      onMouseEnter={() => setIsHovering(true)}
+      onMouseLeave={() => setIsHovering(false)}
+    >
+      {/* Background */}
+      <div className="absolute inset-0 -z-10 bg-zinc-900/50" />
 
-              {/* Custom Controls */}
-              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
-                {/* Progress Bar */}
-                <div
-                  className="w-full h-1 bg-white/20 rounded-full mb-3 cursor-pointer relative group"
-                  onClick={(e) => handleSeek(e, 'main')}
-                >
-                  <div
-                    className="h-full bg-white rounded-full relative transition-all"
-                    style={{ width: `${(currentTime / (currentSource.duration || 1)) * 100}%` }}
-                  >
-                    <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </div>
-                </div>
+      {/* Video Element or Empty State */}
+      {videoUrl ? (
+        <video
+          ref={videoRef}
+          className="max-w-full max-h-full object-contain bg-black"
+          onTimeUpdate={handleTimeUpdate}
+          onLoadedMetadata={handleLoadedMetadata}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onEnded={() => setIsPlaying(false)}
+        >
+          <source src={videoUrl} type="video/mp4" />
+          Your browser does not support the video tag.
+        </video>
+      ) : (
+        <div className="flex flex-col items-center justify-center text-zinc-500">
+          <Film className="w-16 h-16 mb-4 opacity-30" />
+          <p className="text-sm">选择一个视频源开始播放</p>
+          <p className="text-xs mt-1 text-zinc-600">Select a source to play</p>
+        </div>
+      )}
 
-                {/* Control Buttons */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => togglePlay('main')}
-                      className="w-10 h-10 flex items-center justify-center rounded-full bg-white/20 hover:bg-white/30 transition-colors"
-                    >
-                      {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-0.5" />}
-                    </button>
+      {/* Play Button Overlay (when paused) */}
+      {videoUrl && !isPlaying && (
+        <div
+          onClick={togglePlay}
+          className="absolute w-16 h-16 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 cursor-pointer hover:bg-white/20 hover:scale-105 transition-all z-10 shadow-[0_0_30px_rgba(0,0,0,0.3)]"
+        >
+          <Play className="text-white ml-1" size={24} />
+        </div>
+      )}
 
-                    <span className="text-sm text-white font-mono">
-                      {formatTime(currentTime)} / {formatTime(currentSource.duration || 0)}
-                    </span>
+      {/* Source Badge */}
+      {currentSource && (
+        <div className="absolute top-6 left-6 flex gap-2">
+          <div className="px-3 py-1.5 rounded-full bg-black/40 border border-white/10 backdrop-blur-md text-[10px] text-zinc-300 font-mono flex items-center gap-2 shadow-sm">
+            <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
+            <span className="font-bold text-white uppercase">
+              {currentSource.title.slice(0, 20)}
+            </span>
+          </div>
+        </div>
+      )}
 
-                    <button className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors text-white">
-                      <Volume2 className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  <button className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors text-white">
-                    <Maximize className="w-4 h-4" />
-                  </button>
-                </div>
+      {/* Controls Overlay - Always visible at bottom */}
+      {videoUrl && (
+        <div
+          className={cn(
+            'absolute bottom-0 left-0 right-0 px-6 pb-6 pt-10 bg-gradient-to-t from-black/80 via-black/50 to-transparent transition-all',
+            isHovering || !isPlaying
+              ? 'opacity-100'
+              : 'opacity-80'
+          )}
+        >
+          {/* Enhanced Progress Bar with Preview */}
+          <div
+            ref={progressBarRef}
+            onClick={handleProgressClick}
+            onMouseDown={handleDragStart}
+            onMouseEnter={() => setIsHoveringProgress(true)}
+            onMouseLeave={() => setIsHoveringProgress(false)}
+            className="relative w-full h-2 bg-zinc-700/60 rounded-full cursor-pointer group/progress overflow-hidden"
+            style={{ WebkitUserSelect: 'none', userSelect: 'none' }}
+          >
+            {/* Progress Fill */}
+            <div
+              className="h-full bg-gradient-to-r from-blue-500 to-cyan-500 relative transition-all duration-100"
+              style={{ width: `${isDragging ? dragProgress : progress}%` }}
+            >
+              {/* Glow effect */}
+              <div className="absolute inset-0 bg-blue-400/30 blur-sm" />
+              {/* Drag Handle */}
+              <div
+                className={cn(
+                  'absolute right-0 top-1/2 -translate-y-1/2 w-5 h-5 bg-white rounded-full shadow-lg transition-all',
+                  'scale-0 group-hover/progress:scale-100',
+                  isDragging && 'scale-110'
+                )}
+              >
+                <div className="absolute inset-0 bg-white/50 rounded-full animate-ping" />
               </div>
             </div>
-          ) : (
-            <div className="text-center text-zinc-500">
-              <p className="text-lg mb-2">No video selected</p>
-              <p className="text-sm">Select a source from the left panel to get started</p>
-            </div>
-          )
-        ) : (
-          /* Creative Video Player */
-          creativeVideoUrl ? (
-            <div className="w-full h-full flex flex-col relative">
-              {/* Back to Main Button */}
-              <button
-                onClick={() => setActivePlayer('main')}
-                className="absolute top-4 left-4 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-black/50 hover:bg-black/70 transition-colors text-white"
+
+            {/* Hover/Drag preview line */}
+            {(isHoveringProgress || isDragging) && (
+              <div
+                className="absolute top-0 bottom-0 w-0.5 bg-white/80 rounded-full pointer-events-none"
+                style={{ left: `${isDragging ? dragProgress : progress}%` }}
+              />
+            )}
+
+            {/* Time preview on hover */}
+            {(isHoveringProgress || isDragging) && (
+              <div
+                className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-black/90 text-white text-[10px] rounded whitespace-nowrap"
+                style={{ left: `${isDragging ? dragProgress : progress}%` }}
               >
-                <X className="w-4 h-4" />
+                {formatTime(getPreviewTime())}
+              </div>
+            )}
+          </div>
+
+          {/* Control Buttons */}
+          <div className="flex justify-between items-center mt-3">
+            {/* Left Controls */}
+            <div className="flex items-center gap-4">
+              <button
+                onClick={togglePlay}
+                className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-all hover:scale-105"
+              >
+                {isPlaying ? <Pause size={18} className="text-white" /> : <Play size={18} className="text-white ml-0.5" />}
               </button>
 
-              <video
-                ref={creativeVideoRef}
-                src={creativeVideoUrl}
-                className="w-full h-full object-contain"
-                onTimeUpdate={(e) => handleTimeUpdate(e.target as HTMLVideoElement)}
-                controls
-              />
+              <button
+                onClick={toggleMute}
+                className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-all hover:scale-105"
+              >
+                {isMuted ? <VolumeX size={18} className="text-white" /> : <Volume2 size={18} className="text-white" />}
+              </button>
 
-              {/* Player Type Badge */}
-              <div className="absolute top-4 right-4 px-3 py-1 bg-violet-500/80 backdrop-blur-sm rounded-full">
-                <span className="text-xs font-medium text-white uppercase">
-                  {activePlayer}
-                </span>
+              <span className="text-white text-sm font-mono min-w-[100px]">
+                {formatTime(currentTime)} / {formatTime(duration)}
+              </span>
+
+              {/* Playback Speed Control */}
+              <div className="relative">
+                <button
+                  onClick={cycleSpeed}
+                  onMouseEnter={() => setShowSpeedMenu(true)}
+                  onMouseLeave={() => setShowSpeedMenu(false)}
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all',
+                    playbackSpeed !== 1
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-white/10 text-gray-300 hover:bg-white/20'
+                  )}
+                >
+                  <FastForward size={14} />
+                  {playbackSpeed}x
+                </button>
+
+                {/* Speed Tooltip */}
+                {showSpeedMenu && (
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1.5 bg-black/95 backdrop-blur-xl rounded-lg border border-white/10 whitespace-nowrap">
+                    {PLAYBACK_SPEEDS.map((speed) => (
+                      <button
+                        key={speed}
+                        onClick={() => setPlaybackSpeed(speed)}
+                        className={cn(
+                          'block px-3 py-1 text-xs rounded transition-colors',
+                          playbackSpeed === speed
+                            ? 'bg-blue-500 text-white'
+                            : 'text-gray-300 hover:bg-white/10 hover:text-white'
+                        )}
+                      >
+                        {speed}x
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
-          ) : (
-            <div className="text-center text-zinc-500">
-              <p className="text-lg mb-2">No creative video available</p>
-              <p className="text-sm">Generate a video from the Studio tab first</p>
+
+            {/* Right Controls */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={toggleFullscreen}
+                className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-all hover:scale-105"
+              >
+                <Maximize size={18} className="text-white" />
+              </button>
             </div>
-          )
-        )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function ChatPanel() {
+  const { messages, language, sendChatMessage, isLoading, seekTo, sources, selectedSourceIds } = useAppStore()
+  const [inputValue, setInputValue] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  const t = {
+    zh: {
+      placeholder: '针对视频内容提问...',
+      thinking: '正在思考...',
+      processingWarning: '⏳ 部分视频仍在处理中，建议等待"就绪"后再提问',
+      noReadyVideos: '暂无可用视频，请等待视频处理完成',
+    },
+    en: {
+      placeholder: 'Ask about the video...',
+      thinking: 'Thinking...',
+      processingWarning: '⏳ Some videos are still processing, wait for "Ready" status',
+      noReadyVideos: 'No videos ready, please wait for processing to complete',
+    },
+  }
+
+  // Check if any selected source (or all sources if none selected) is still processing
+  const relevantSources = selectedSourceIds.length > 0
+    ? sources.filter(s => selectedSourceIds.includes(s.id))
+    : sources
+
+  const processingCount = relevantSources.filter(
+    s => s.status === 'processing' || s.status === 'analyzing' || s.status === 'uploaded'
+  ).length
+  const readyCount = relevantSources.filter(s => s.status === 'done').length
+  const hasProcessing = processingCount > 0
+  const noReadyVideos = readyCount === 0 && relevantSources.length > 0
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  const handleSend = async () => {
+    if (!inputValue.trim() || isLoading) return
+    const message = inputValue.trim()
+    setInputValue('')
+    await sendChatMessage(message)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
+    }
+  }
+
+  // Parse content and render citations as clickable links with markdown support
+  const renderContent = (content: string) => {
+    const lines = content.split('\n')
+    const result: React.ReactNode[] = []
+
+    for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+      const line = lines[lineIdx]
+
+      // Handle headers ## or ###
+      if (line.startsWith('### ')) {
+        result.push(<h3 key={`h3-${lineIdx}`} className="text-sm font-bold text-white mt-3 mb-1">{line.slice(4)}</h3>)
+        continue
+      } else if (line.startsWith('## ')) {
+        result.push(<h2 key={`h2-${lineIdx}`} className="text-base font-bold text-white mt-3 mb-1">{line.slice(3)}</h2>)
+        continue
+      } else if (line.startsWith('# ')) {
+        result.push(<h1 key={`h1-${lineIdx}`} className="text-lg font-bold text-white mt-3 mb-2">{line.slice(2)}</h1>)
+        continue
+      }
+
+      // Handle list items
+      const listMatch = line.match(/^(\d+\.|-)\s+(.*)/)
+      if (listMatch) {
+        result.push(
+          <li key={`li-${lineIdx}`} className="text-sm text-zinc-300 ml-4 mb-1 list-disc">
+            {renderInlineMarkdown(listMatch[2])}
+          </li>
+        )
+        continue
+      }
+
+      // Handle empty lines
+      if (line.trim() === '') {
+        result.push(<br key={`br-${lineIdx}`} />)
+        continue
+      }
+
+      // Regular paragraph with inline markdown and citations
+      result.push(
+        <p key={`p-${lineIdx}`} className="text-sm text-zinc-300 mb-1 leading-relaxed">
+          {renderInlineMarkdown(line)}
+        </p>
+      )
+    }
+
+    return result
+  }
+
+  // Render inline markdown (bold, citations) within a line
+  const renderInlineMarkdown = (text: string): React.ReactNode => {
+    const parts: React.ReactNode[] = []
+    let lastIndex = 0
+
+    // First, process bold **text**
+    const boldRegex = /\*\*([^*]+)\*\*/g
+    const boldMatches: Array<{index: number, length: number, text: string}> = []
+    let boldMatch
+    while ((boldMatch = boldRegex.exec(text)) !== null) {
+      boldMatches.push({ index: boldMatch.index, length: boldMatch[0].length, text: boldMatch[1] })
+    }
+
+    // Process text with bold and citations
+    const citationRegex = /\[([^\]]+)\s+(\d{1,2}):(\d{2})\]/g
+    const allMatches: Array<{index: number, length: number, type: 'bold' | 'citation', data?: any}> = []
+
+    // Collect all bold matches
+    for (const m of boldMatches) {
+      allMatches.push({ index: m.index, length: m.length, type: 'bold', data: m.text })
+    }
+
+    // Collect all citation matches
+    let citationMatch
+    citationRegex.lastIndex = 0 // Reset regex
+    while ((citationMatch = citationRegex.exec(text)) !== null) {
+      allMatches.push({
+        index: citationMatch.index,
+        length: citationMatch[0].length,
+        type: 'citation',
+        data: { videoTitle: citationMatch[1], minutes: citationMatch[2], seconds: citationMatch[3] }
+      })
+    }
+
+    // Sort matches by position
+    allMatches.sort((a, b) => a.index - b.index)
+
+    // Build parts array
+    for (const match of allMatches) {
+      // Add text before match
+      if (match.index > lastIndex) {
+        parts.push(text.slice(lastIndex, match.index))
+      }
+
+      if (match.type === 'bold') {
+        parts.push(<strong key={`bold-${match.index}`} className="font-semibold text-white">{match.data}</strong>)
+      } else if (match.type === 'citation') {
+        const timestamp = parseInt(match.data.minutes) * 60 + parseInt(match.data.seconds)
+        const source = sources.find(s =>
+          s.title.includes(match.data.videoTitle) || match.data.videoTitle.includes(s.title.slice(0, 10))
+        )
+        const sourceId = source?.id || sources[0]?.id || ''
+
+        parts.push(
+          <span
+            key={`cite-${match.index}`}
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 text-blue-400 cursor-pointer hover:underline hover:text-blue-300 transition-colors text-xs bg-blue-500/10 rounded"
+            onClick={() => sourceId && seekTo(sourceId, timestamp)}
+            title={`跳转到 ${match.data.minutes}:${match.data.seconds}`}
+          >
+            <Clock className="w-3 h-3" />
+            {match.data.minutes}:{match.data.seconds}
+          </span>
+        )
+      }
+
+      lastIndex = match.index + match.length
+    }
+
+    // Add remaining text
+    if (lastIndex < text.length) {
+      parts.push(text.slice(lastIndex))
+    }
+
+    return parts.length > 0 ? parts : text
+  }
+
+  return (
+    <div className="floating-panel flex flex-col h-full bg-[#121214]">
+      {/* Header */}
+      <div className="h-10 flex items-center justify-between px-5 border-b border-zinc-800/50 bg-[#18181b]/50">
+        <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+          <Terminal className="w-3 h-3" />
+          Intelligence Log
+        </span>
+        <MoreHorizontal className="w-4 h-4 text-zinc-600 cursor-pointer hover:text-zinc-400" />
       </div>
 
-      {/* Chat Area (Bottom Panel) */}
-      <div className="border-t border-zinc-800/50 flex flex-col h-full max-h-[40%]">
-        {/* Chat Header */}
-        <div className="px-4 py-3 border-b border-zinc-800/50 flex items-center gap-2">
-          <MessageCircle className="w-4 h-4 text-zinc-400" />
-          <h3 className="text-sm font-medium text-zinc-200">AI Chat</h3>
-        </div>
-
-        {/* Messages Area */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 scroller">
-          {messages.length === 0 ? (
-            <div className="text-center text-zinc-500 py-8">
-              <p>Ask a question about your videos</p>
-              <p className="text-sm mt-1">AI will answer with timestamp references</p>
-            </div>
-          ) : (
-            messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                <div
-                  className={`max-w-[80%] rounded-2xl px-4 py-2 ${
-                    msg.role === 'user'
-                      ? 'bg-zinc-700 text-white rounded-tr-sm'
-                      : 'bg-zinc-800 text-zinc-200 rounded-tl-sm'
-                  }`}
-                >
-                  <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                  {msg.references && msg.references.length > 0 && (
-                    <div className="mt-2 pt-2 border-t border-white/10">
-                      <p className="text-[10px] text-zinc-400">References:</p>
-                      {msg.references.map((ref, i) => (
-                        <button
-                          key={i}
-                          className="block text-[10px] text-violet-400 hover:text-violet-300 mt-1 text-left"
-                          onClick={() => {
-                            setActivePlayer('main')
-                            const video = mainVideoRef.current
-                            if (video) {
-                              video.currentTime = ref.timestamp
-                              setCurrentSource(ref.source_id)
-                              video.play()
-                            }
-                          }}
-                        >
-                          [{ref.source_id} {Math.floor(ref.timestamp / 60)}:{(ref.timestamp % 60).toFixed(0).padStart(2, '0')}]
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))
-          )}
-          {isChatting && (
-            <div className="flex justify-start">
-              <div className="bg-zinc-800 rounded-2xl rounded-tl-sm px-4 py-2">
-                <div className="flex gap-1">
-                  <div className="w-2 h-2 bg-zinc-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <div className="w-2 h-2 bg-zinc-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <div className="w-2 h-2 bg-zinc-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Chat Input */}
-        <div className="p-4 border-t border-zinc-800/50">
-          <form
-            className="flex gap-2"
-            onSubmit={async (e) => {
-              e.preventDefault()
-              const input = e.currentTarget.querySelector('input') as HTMLInputElement
-              if (input?.value) {
-                await sendChatMessage(input.value)
-                input.value = ''
-              }
-            }}
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto scroller p-5 space-y-5">
+        {messages.map((msg) => (
+          <div
+            key={msg.id}
+            className={cn(
+              'flex gap-4',
+              msg.role === 'user' && 'flex-row-reverse'
+            )}
           >
-            <input
-              type="text"
-              placeholder="Ask a question about your videos..."
-              className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-2 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-600"
-              disabled={isChatting}
-            />
-            <button
-              type="submit"
-              disabled={isChatting}
-              className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded-xl text-sm font-medium transition-colors"
+            <div
+              className={cn(
+                'w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-xs shadow-md border border-white/10',
+                msg.role === 'ai' ? 'bg-white text-black' : 'bg-zinc-700 text-white'
+              )}
             >
-              Send
-            </button>
-          </form>
+              {msg.role === 'ai' ? '🔮' : '👤'}
+            </div>
+            <div
+              className={cn(
+                'p-4 rounded-2xl text-sm leading-relaxed max-w-[85%] border-zinc-800/50 shadow-sm',
+                msg.role === 'ai' ? 'bubble-ai' : 'bubble-user'
+              )}
+            >
+              {msg.role === 'ai' ? renderContent(msg.content) : msg.content}
+              {/* Show references if available */}
+              {msg.references && msg.references.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-zinc-700/50">
+                  <div className="text-[10px] text-zinc-500 mb-2">📎 相关片段:</div>
+                  <div className="flex flex-wrap gap-2">
+                    {msg.references.slice(0, 3).map((ref, idx) => (
+                      <span
+                        key={idx}
+                        onClick={() => ref.source_id && seekTo(ref.source_id, ref.timestamp)}
+                        className="text-[10px] px-2 py-1 bg-zinc-800 rounded-full text-zinc-400 cursor-pointer hover:bg-zinc-700 hover:text-zinc-300 transition-colors"
+                      >
+                        {Math.floor(ref.timestamp / 60)}:{String(Math.floor(ref.timestamp % 60)).padStart(2, '0')}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+        {/* Loading indicator */}
+        {isLoading && (
+          <div className="flex gap-4">
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 text-xs shadow-md border border-white/10 bg-white text-black">
+              🔮
+            </div>
+            <div className="p-4 rounded-2xl text-sm leading-relaxed bubble-ai">
+              <span className="flex items-center gap-2 text-zinc-400">
+                <span className="animate-pulse">●</span>
+                {t[language].thinking}
+              </span>
+            </div>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input */}
+      <div className="p-4 border-t border-zinc-800/50 bg-[#18181b]/30">
+        {/* Processing Warning */}
+        {hasProcessing && (
+          <div className="mb-3 px-3 py-2 text-[11px] text-amber-400 bg-amber-500/10 rounded-lg border border-amber-500/20">
+            {noReadyVideos ? t[language].noReadyVideos : t[language].processingWarning}
+            <span className="text-zinc-500 ml-2">({readyCount}/{relevantSources.length} 就绪)</span>
+          </div>
+        )}
+        <div className="relative">
+          <input
+            ref={inputRef}
+            type="text"
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={isLoading}
+            className="w-full bg-[#18181b] border border-zinc-800/80 rounded-xl py-3 pl-4 pr-12 text-xs text-white focus:border-zinc-500 outline-none transition-colors shadow-inner disabled:opacity-50"
+            placeholder={t[language].placeholder}
+          />
+          <button
+            onClick={handleSend}
+            disabled={isLoading || !inputValue.trim()}
+            className="absolute right-2 top-1.5 w-8 h-8 bg-white text-black rounded-lg hover:bg-gray-200 flex items-center justify-center transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <ArrowUp className="w-4 h-4" />
+          </button>
         </div>
       </div>
     </div>

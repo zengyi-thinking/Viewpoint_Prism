@@ -1,22 +1,18 @@
-// === Core Type Definitions ===
-
-// Video source status
-export type SourceStatus = 'imported' | 'uploaded' | 'processing' | 'analyzing' | 'done' | 'error'
-
-// Video source
+// Video source types
 export interface VideoSource {
   id: string
   title: string
   file_path: string
   url: string
-  file_type: 'video' | 'document'
-  platform: string
+  file_type: 'video' | 'pdf' | 'audio'
+  platform: 'tiktok' | 'bilibili' | 'youtube' | 'local'
   duration: number | null
-  status: SourceStatus
+  thumbnail: string | null
+  status: 'imported' | 'uploaded' | 'processing' | 'analyzing' | 'done' | 'error'
   created_at: string
 }
 
-// Viewpoint
+// Conflict/Viewpoint types
 export interface Viewpoint {
   source_id: string
   source_name: string
@@ -26,7 +22,6 @@ export interface Viewpoint {
   color: 'red' | 'blue'
 }
 
-// Conflict
 export interface Conflict {
   id: string
   topic: string
@@ -36,29 +31,27 @@ export interface Conflict {
   verdict: string
 }
 
-// Graph node
+// Knowledge graph types
 export interface GraphNode {
   id: string
   name: string
   category: 'boss' | 'item' | 'location' | 'character'
-  timestamp: number | null
-  source_id: string | null
+  timestamp?: number
+  source_id?: string
 }
 
-// Graph link
 export interface GraphLink {
   source: string
   target: string
-  relation: string | null
+  relation?: string
 }
 
-// Knowledge graph
 export interface KnowledgeGraph {
   nodes: GraphNode[]
   links: GraphLink[]
 }
 
-// Timeline event
+// Timeline types
 export interface TimelineEvent {
   id: string
   time: string
@@ -70,31 +63,50 @@ export interface TimelineEvent {
   event_type: 'STORY' | 'COMBAT' | 'EXPLORE'
 }
 
-// Chat reference
+// Chat types
 export interface ChatReference {
   source_id: string
   timestamp: number
   text: string
 }
 
-// Chat message
 export interface ChatMessage {
   id: string
-  session_id: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'ai'
   content: string
-  references: ChatReference[]
-  created_at: string
+  timestamp: Date
+  references?: ChatReference[]
 }
 
-// Creative task status
-export type TaskStatus = 'pending' | 'processing' | 'generating_script' |
-  'generating_voiceover' | 'composing_video' | 'searching' | 'downloading' |
-  'ingesting' | 'completed' | 'error'
+// Layout types
+export type PanelPosition = 'left' | 'bottom' | 'right'
+export type AnalysisTab = 'conflicts' | 'graph' | 'timeline'
+export type Language = 'zh' | 'en'
+export type ActivePlayer = 'main' | 'debate' | 'supercut' | 'digest' | 'director' | null
 
-// Debate video task
+// API Response types
+export interface SourceListResponse {
+  sources: VideoSource[]
+  total: number
+}
+
+export interface AnalysisResponse {
+  conflicts: Conflict[]
+  graph: KnowledgeGraph
+  timeline: TimelineEvent[]
+}
+
+// Upload state
+export interface UploadState {
+  isUploading: boolean
+  progress: number
+  error: string | null
+}
+
+// Debate video generation task
 export interface DebateTask {
-  status: TaskStatus
+  task_id: string
+  status: 'pending' | 'generating_script' | 'generating_voiceover' | 'composing_video' | 'completed' | 'error'
   progress: number
   message: string
   video_url?: string
@@ -102,11 +114,68 @@ export interface DebateTask {
   error?: string
 }
 
-// AI director task
+// Phase 7: Entity Supercut types
+export interface SupercutClip {
+  source_id: string
+  video_title: string
+  timestamp: string
+  score: number
+}
+
+export interface SupercutTask {
+  task_id: string
+  status: 'pending' | 'searching' | 'composing' | 'completed' | 'error'
+  progress: number
+  message: string
+  video_url?: string
+  entity_name?: string
+  clip_count?: number
+  clips?: SupercutClip[]
+  error?: string
+}
+
+export interface EntityStats {
+  entity_name: string
+  video_count: number
+  occurrence_count: number
+}
+
+// Entity Card state for Graph interaction
+export interface EntityCardState {
+  isOpen: boolean
+  entity: GraphNode | null
+  stats: EntityStats | null
+  position: { x: number; y: number }
+  task?: SupercutTask
+}
+
+// Phase 8: Digest types
+export interface DigestTask {
+  task_id: string
+  status: 'pending' | 'filtering' | 'composing' | 'completed' | 'error'
+  progress: number
+  message: string
+  video_url?: string
+  source_id?: string
+  segment_count?: number
+  include_types?: string[]
+  total_duration?: number
+  error?: string
+}
+
+// Phase 10: Director Cut types
 export type Persona = 'hajimi' | 'wukong' | 'pro'
 
+export interface PersonaConfig {
+  id: Persona
+  name: string
+  emoji: string
+  description: string
+}
+
 export interface DirectorTask {
-  status: TaskStatus
+  task_id: string
+  status: 'pending' | 'generating_script' | 'generating_voiceover' | 'composing_video' | 'completed' | 'error'
   progress: number
   message: string
   video_url?: string
@@ -117,57 +186,47 @@ export interface DirectorTask {
   error?: string
 }
 
-// Supercut task
-export interface SupercutTask {
-  status: TaskStatus
-  progress: number
-  message: string
-  video_url?: string
-  clip_count?: number
-  error?: string
-}
-
-// Digest task
-export interface DigestTask {
-  status: TaskStatus
-  progress: number
-  message: string
-  video_url?: string
-  segment_count?: number
-  total_duration?: number
-  error?: string
-}
-
-// Network search task
+// Phase 11: Network Search types
 export interface NetworkSearchTask {
-  status: TaskStatus
+  task_id: string
+  status: 'pending' | 'searching' | 'downloading' | 'ingesting' | 'completed' | 'error'
   progress: number
   message: string
-  files?: Array<{
-    id: string
-    title: string
-    file_path: string
-  }>
+  source_ids?: string[]
   error?: string
 }
 
-// Analysis tab
-export type AnalysisTab = 'studio' | 'conflicts' | 'graph' | 'timeline' | 'report'
+export interface NetworkSearchRequest {
+  platform: string
+  keyword: string
+  limit?: number
+}
 
-// Active player
-export type ActivePlayer = 'main' | 'debate' | 'director' | 'supercut' | 'digest'
+// App state types
+export interface AppState {
+  // Sources
+  sources: VideoSource[]
+  selectedSourceIds: string[]
+  currentSourceId: string | null
 
-// Panel position
-export type PanelPosition = 'left' | 'bottom' | 'right'
+  // Playback
+  currentTime: number
+  isPlaying: boolean
 
-// Language
-export type Language = 'zh' | 'en'
+  // Analysis
+  conflicts: Conflict[]
+  graph: KnowledgeGraph
+  timeline: TimelineEvent[]
 
-// Entity card state
-export interface EntityCardState {
-  isOpen: boolean
-  entity: GraphNode | null
-  position: { x: number; y: number }
-  stats: { video_count: number; occurrence_count: number } | null
-  task: SupercutTask | null
+  // Chat
+  messages: ChatMessage[]
+  isLoading: boolean
+
+  // Upload
+  uploadState: UploadState
+
+  // UI
+  activeTab: AnalysisTab
+  language: Language
+  panelVisibility: Record<PanelPosition, boolean>
 }
