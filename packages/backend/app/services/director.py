@@ -387,7 +387,12 @@ class DirectorService:
         output_path: Path,
     ) -> bool:
         """
-        Compose director cut video with dynamic audio mixing.
+        Compose director cut video with ATOMIC CLIP strategy.
+
+        CRITICAL FIX for audio-video sync:
+        1. Generate each clip as an ATOMIC unit with AUDIO-DRIVEN duration
+        2. Voiceover clips: duration = actual audio duration (from mutagen)
+        3. Concatenate all atomic clips using FFmpeg concat demuxer (lossless)
 
         Args:
             sequence: List of SequenceSegment objects
@@ -402,98 +407,98 @@ class DirectorService:
         try:
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Create temp directory
+            # Create temp directory for atomic clips
             temp_dir = GENERATED_DIR / f"temp_director_{uuid.uuid4().hex[:8]}"
             temp_dir.mkdir(parents=True, exist_ok=True)
 
             processed_clips = []
+            total_expected_duration = 0.0
+
+            logger.info(f"=== ATOMIC CLIP STRATEGY: Processing {len(sequence)} segments ===")
 
             for i, segment in enumerate(sequence):
-                logger.info(f"Processing segment {i+1}/{len(sequence)}: {segment.source} @ {segment.start_hint}s")
+                logger.info(f"[{i+1}/{len(sequence)}] {segment.source} @ {segment.start_hint}s | mode={segment.audio_mode}")
 
                 clip_output = temp_dir / f"clip_{i:03d}.mp4"
+                voiceover_path = voiceover_paths.get(i)
 
-                # Handle intro/outro segments with voiceover-only clips
+                # INTRO/OUTRO: Pure voiceover with black screen
                 if segment.source in ("intro", "outro"):
-                    # For intro/outro, use voiceover-only clip to avoid audio-video mismatch
-                    voiceover_path = voiceover_paths.get(i)
                     if voiceover_path and voiceover_path.exists():
+                        # AUDIO-DRIVEN: Duration from actual voiceover audio
+                        vo_duration = self._get_audio_duration_mutagen(voiceover_path)
+                        logger.info(f"  -> Voiceover-only clip, audio duration: {vo_duration:.3f}s")
+
                         success = await self._create_voiceover_only_clip(
                             voiceover_path=voiceover_path,
                             subtitle=segment.subtitle,
-                            duration=segment.duration,
+                            duration=segment.duration,  # Fallback only
                             output_path=clip_output,
                         )
+                        if success and vo_duration > 0:
+                            total_expected_duration += vo_duration
                     else:
-                        # Fallback: use source A with voiceover
-                        logger.warning(f"No voiceover for intro/outro segment {i}, using fallback")
-                        success = await self._process_voiceover_segment(
-                            source_path=source_a_path,
-                            start_time=0,
+                        logger.warning(f"  -> No voiceover for {segment.source}, creating silent placeholder")
+                        success = await self._create_silent_clip(
                             duration=segment.duration,
                             subtitle=segment.subtitle,
-                            voiceover_path=None,
                             output_path=clip_output,
                         )
-                elif segment.source == "A":
-                    source_path = source_a_path
+                        total_expected_duration += segment.duration
+
+                # SOURCE A or B with VOICEOVER mode
+                elif segment.audio_mode == "voiceover" and voiceover_path and voiceover_path.exists():
+                    source_path = source_a_path if segment.source == "A" else source_b_path
                     start_time = segment.exact_start
 
-                    # Build FFmpeg command based on audio_mode
-                    if segment.audio_mode == "original":
-                        success = await self._process_original_segment(
-                            source_path=source_path,
-                            start_time=start_time,
-                            duration=segment.duration,
-                            subtitle=segment.subtitle,
-                            output_path=clip_output,
-                        )
-                    else:  # voiceover
-                        voiceover_path = voiceover_paths.get(i)
-                        success = await self._process_voiceover_segment(
-                            source_path=source_path,
-                            start_time=start_time,
-                            duration=segment.duration,
-                            subtitle=segment.subtitle,
-                            voiceover_path=voiceover_path,
-                            output_path=clip_output,
-                        )
-                else:  # B
-                    source_path = source_b_path
+                    # AUDIO-DRIVEN: Use new atomic clip method
+                    vo_duration = self._get_audio_duration_mutagen(voiceover_path)
+                    logger.info(f"  -> Voiceover segment, audio duration: {vo_duration:.3f}s")
+
+                    success = await self._create_atomic_video_clip(
+                        source_path=source_path,
+                        start_time=start_time,
+                        audio_path=voiceover_path,
+                        subtitle=segment.subtitle,
+                        output_path=clip_output,
+                        use_original_audio=False,
+                    )
+                    if success and vo_duration > 0:
+                        total_expected_duration += vo_duration
+
+                # SOURCE A or B with ORIGINAL audio
+                else:
+                    source_path = source_a_path if segment.source == "A" else source_b_path
                     start_time = segment.exact_start
 
-                    # Build FFmpeg command based on audio_mode
-                    if segment.audio_mode == "original":
-                        success = await self._process_original_segment(
-                            source_path=source_path,
-                            start_time=start_time,
-                            duration=segment.duration,
-                            subtitle=segment.subtitle,
-                            output_path=clip_output,
-                        )
-                    else:  # voiceover
-                        voiceover_path = voiceover_paths.get(i)
-                        success = await self._process_voiceover_segment(
-                            source_path=source_path,
-                            start_time=start_time,
-                            duration=segment.duration,
-                            subtitle=segment.subtitle,
-                            voiceover_path=voiceover_path,
-                            output_path=clip_output,
-                        )
+                    logger.info(f"  -> Original audio segment, duration: {segment.duration:.1f}s")
 
-                if success and clip_output.exists():
+                    success = await self._process_original_segment(
+                        source_path=source_path,
+                        start_time=start_time,
+                        duration=segment.duration,
+                        subtitle=segment.subtitle,
+                        output_path=clip_output,
+                    )
+                    total_expected_duration += segment.duration
+
+                # Verify and collect clip
+                if success and clip_output.exists() and clip_output.stat().st_size > 1000:
+                    actual_clip_duration = await self._get_audio_duration(clip_output)
+                    logger.info(f"  -> Clip saved: {clip_output.name} ({actual_clip_duration:.2f}s)")
                     processed_clips.append(str(clip_output))
                 else:
-                    logger.warning(f"Segment {i} processing failed, skipping")
+                    logger.warning(f"  -> Segment {i} FAILED, skipping")
 
             if not processed_clips:
                 logger.error("No clips were processed successfully")
                 self._cleanup_temp_dir(temp_dir)
                 return False
 
-            # Concatenate all clips with crossfade
-            final_success = await self._concatenate_with_transition(
+            logger.info(f"=== CONCATENATION: {len(processed_clips)} clips, expected ~{total_expected_duration:.1f}s ===")
+
+            # STEP 3: Concatenate using concat demuxer (lossless)
+            final_success = await self._concatenate_atomic_clips(
                 clips=processed_clips,
                 output_path=output_path,
                 temp_dir=temp_dir,
@@ -506,7 +511,194 @@ class DirectorService:
 
         except Exception as e:
             logger.error(f"Director cut composition error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
+
+    async def _create_silent_clip(
+        self,
+        duration: float,
+        subtitle: str,
+        output_path: Path,
+    ) -> bool:
+        """Create a silent black clip with subtitle (fallback for missing voiceover)."""
+        try:
+            safe_subtitle = self._escape_ffmpeg_text(subtitle)
+
+            cmd = [
+                "ffmpeg", "-y",
+                "-f", "lavfi",
+                "-i", f"color=c=black:s=1280x720:d={duration}:r=30",
+                "-f", "lavfi",
+                "-i", f"anullsrc=r=44100:cl=stereo",
+                "-t", str(duration),
+                "-vf", (
+                    f"drawbox=x=0:y=ih-60:w=iw:h=60:color=black@0.6:t=fill,"
+                    f"drawtext=text='{safe_subtitle}':"
+                    f"fontsize=32:fontcolor=white:x=(w-text_w)/2:y=h-45:"
+                    f"borderw=2:bordercolor=black"
+                ),
+                "-c:v", "libx264",
+                "-preset", "fast",
+                "-crf", "23",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                str(output_path)
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            return result.returncode == 0
+
+        except Exception as e:
+            logger.error(f"Silent clip creation error: {e}")
+            return False
+
+    async def _concatenate_atomic_clips(
+        self,
+        clips: List[str],
+        output_path: Path,
+        temp_dir: Path,
+    ) -> bool:
+        """
+        Concatenate atomic clips using FFmpeg concat demuxer (lossless).
+
+        This is the final step of the atomic clip strategy.
+        Uses file_list.txt approach for best audio-video sync.
+        """
+        try:
+            if not clips:
+                logger.error("No clips to concatenate")
+                return False
+
+            if len(clips) == 1:
+                # Single clip: just copy
+                shutil.copy(clips[0], output_path)
+                logger.info(f"Single clip copied to {output_path}")
+                return True
+
+            # Create file list for concat demuxer
+            file_list_path = temp_dir / "file_list.txt"
+            with open(file_list_path, "w", encoding="utf-8") as f:
+                for clip in clips:
+                    # Use forward slashes and escape special chars
+                    clip_path = Path(clip).absolute().as_posix()
+                    f.write(f"file '{clip_path}'\n")
+
+            logger.info(f"Concatenating {len(clips)} clips using concat demuxer")
+
+            # Use concat demuxer for lossless concatenation
+            cmd = [
+                "ffmpeg", "-y",
+                "-f", "concat",
+                "-safe", "0",
+                "-i", str(file_list_path),
+                "-c", "copy",  # Stream copy for lossless concat
+                "-movflags", "+faststart",
+                str(output_path)
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+
+            if result.returncode != 0:
+                logger.error(f"Concat demuxer failed: {result.stderr[-500:]}")
+
+                # Fallback: Re-encode using filter_complex
+                logger.info("Falling back to filter_complex concat...")
+                return await self._concatenate_with_reencode(clips, output_path)
+
+            # Verify output
+            if output_path.exists() and output_path.stat().st_size > 1000:
+                final_duration = await self._get_audio_duration(output_path)
+                logger.info(f"Final video: {output_path.name} ({final_duration:.2f}s, {output_path.stat().st_size//1024}KB)")
+
+                # Log audio-video sync verification
+                await self._verify_av_sync(output_path)
+
+                return True
+            else:
+                logger.error(f"Output file missing or too small: {output_path}")
+                return False
+
+        except subprocess.TimeoutExpired:
+            logger.error("Concatenation timeout (300s)")
+            return False
+        except Exception as e:
+            logger.error(f"Concatenation error: {e}")
+            return False
+
+    async def _concatenate_with_reencode(
+        self,
+        clips: List[str],
+        output_path: Path,
+    ) -> bool:
+        """Fallback concatenation with re-encoding (slower but more compatible)."""
+        try:
+            filter_parts = []
+            input_args = ["ffmpeg", "-y"]
+
+            for i, clip in enumerate(clips):
+                input_args.extend(["-i", str(Path(clip).absolute())])
+                filter_parts.append(f"[{i}:v][{i}:a]")
+
+            concat_filter = "".join(filter_parts) + f"concat=n={len(clips)}:v=1:a=1[v][a]"
+
+            input_args.extend([
+                "-filter_complex", concat_filter,
+                "-map", "[v]",
+                "-map", "[a]",
+                "-c:v", "libx264",
+                "-preset", "fast",
+                "-crf", "23",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                "-movflags", "+faststart",
+                str(output_path.absolute())
+            ])
+
+            result = subprocess.run(input_args, capture_output=True, text=True, timeout=300)
+
+            if result.returncode != 0:
+                logger.error(f"Re-encode concat failed: {result.stderr[-500:]}")
+                return False
+
+            return output_path.exists() and output_path.stat().st_size > 1000
+
+        except Exception as e:
+            logger.error(f"Re-encode concat error: {e}")
+            return False
+
+    async def _verify_av_sync(self, video_path: Path) -> Dict[str, float]:
+        """Verify audio-video synchronization of the final output."""
+        try:
+            cmd = [
+                "ffprobe", "-v", "error",
+                "-show_entries", "stream=codec_type,duration",
+                "-of", "json",
+                str(video_path)
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                streams = data.get("streams", [])
+
+                v_dur = next((float(s.get("duration", 0)) for s in streams if s.get("codec_type") == "video"), 0)
+                a_dur = next((float(s.get("duration", 0)) for s in streams if s.get("codec_type") == "audio"), 0)
+                diff = abs(v_dur - a_dur)
+
+                if diff > 1.0:
+                    logger.warning(f"⚠️ AV SYNC WARNING: Video={v_dur:.2f}s, Audio={a_dur:.2f}s (diff={diff:.2f}s)")
+                else:
+                    logger.info(f"✓ AV SYNC OK: Video={v_dur:.2f}s, Audio={a_dur:.2f}s (diff={diff:.3f}s)")
+
+                return {"video_duration": v_dur, "audio_duration": a_dur, "diff": diff}
+
+        except Exception as e:
+            logger.warning(f"AV sync verification failed: {e}")
+
+        return {}
 
     async def _process_original_segment(
         self,
@@ -614,10 +806,8 @@ class DirectorService:
     ) -> bool:
         """Create a voiceover-only clip with black screen and subtitle.
 
-        This is used for intro/outro segments where we want pure narration
-        without extracting from source video (which causes audio-video mismatch).
-
-        CRITICAL: Uses actual audio duration to ensure perfect sync.
+        CRITICAL FIX: Uses mutagen for precise audio duration + -shortest flag
+        to ensure PERFECT audio-video sync.
 
         Args:
             voiceover_path: Path to TTS audio file
@@ -634,23 +824,25 @@ class DirectorService:
                 logger.warning(f"Voiceover file not found: {voiceover_path}")
                 return False
 
-            # Get actual audio duration for perfect sync
-            actual_duration = await self._get_audio_duration(voiceover_path)
-            if actual_duration > 0:
-                video_duration = actual_duration
-                logger.info(f"Voiceover audio duration: {actual_duration:.2f}s")
-            else:
-                video_duration = duration
-                logger.warning(f"Using fallback duration: {duration:.2f}s")
+            # CRITICAL: Use mutagen for precise MP3 duration
+            actual_duration = self._get_audio_duration_mutagen(voiceover_path)
+            if actual_duration <= 0:
+                logger.warning(f"Could not get audio duration, using fallback: {duration}s")
+                actual_duration = duration
+
+            logger.info(f"Creating atomic voiceover clip: audio={actual_duration:.3f}s")
 
             safe_subtitle = self._escape_ffmpeg_text(subtitle)
 
-            # Create a black screen video with subtitle
-            # Use the actual audio duration for the video to ensure perfect sync
+            # ATOMIC CLIP STRATEGY:
+            # 1. -loop 1: Loop the static image (black screen)
+            # 2. -t {duration}: Set video stream duration
+            # 3. -shortest: End at the shortest stream (audio)
+            # This ensures video duration EXACTLY matches audio duration
             cmd = [
                 "ffmpeg", "-y",
                 "-f", "lavfi",
-                "-i", f"color=c={background_color}:s=1280x720:d={video_duration + 0.5}:r=30",  # Add 0.5s buffer
+                "-i", f"color=c={background_color}:s=1280x720:d={actual_duration + 1}:r=30",
                 "-i", str(voiceover_path),
                 "-vf", (
                     f"drawbox=x=0:y=ih-60:w=iw:h=60:color=black@0.6:t=fill,"
@@ -658,7 +850,7 @@ class DirectorService:
                     f"fontsize=32:fontcolor=white:x=(w-text_w)/2:y=h-45:"
                     f"borderw=2:bordercolor=black"
                 ),
-                "-shortest",  # End at shortest input (the audio)
+                "-shortest",  # CRITICAL: Ensures perfect sync
                 "-c:v", "libx264",
                 "-preset", "fast",
                 "-crf", "23",
@@ -671,16 +863,158 @@ class DirectorService:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
 
             if result.returncode != 0:
-                logger.error(f"Voiceover-only clip error: {result.stderr[-500:]}")
+                logger.error(f"Atomic voiceover clip error: {result.stderr[-500:]}")
                 return False
 
-            # Verify the output has matching audio-video durations
+            # Verify output duration matches expected
             final_duration = await self._get_audio_duration(output_path)
-            logger.info(f"Created voiceover-only clip: {output_path.name} ({final_duration:.2f}s)")
+            duration_diff = abs(final_duration - actual_duration)
+            if duration_diff > 0.5:
+                logger.warning(f"Duration mismatch: expected {actual_duration:.2f}s, got {final_duration:.2f}s")
+            else:
+                logger.info(f"Atomic clip created: {output_path.name} ({final_duration:.2f}s)")
+
             return True
 
         except Exception as e:
-            logger.error(f"Voiceover-only clip creation error: {e}")
+            logger.error(f"Atomic voiceover clip creation error: {e}")
+            return False
+
+    async def _create_atomic_video_clip(
+        self,
+        source_path: Path,
+        start_time: float,
+        audio_path: Optional[Path],
+        subtitle: str,
+        output_path: Path,
+        use_original_audio: bool = True,
+    ) -> bool:
+        """
+        Create an atomic video clip with AUDIO-DRIVEN duration.
+
+        CRITICAL: This is the core of the audio-video sync fix.
+        When voiceover is provided, the clip duration is determined by
+        the voiceover audio length, NOT by a fixed duration parameter.
+
+        Args:
+            source_path: Path to source video
+            start_time: Start time in source video
+            audio_path: Path to voiceover audio (if any)
+            subtitle: Subtitle text
+            output_path: Output path
+            use_original_audio: If True and no voiceover, keep original audio
+
+        Returns:
+            True if successful
+        """
+        try:
+            safe_subtitle = self._escape_ffmpeg_text(subtitle)
+
+            # Video filter for 1280x720 with subtitle
+            video_filter = (
+                f"scale=1280:720:force_original_aspect_ratio=decrease,"
+                f"pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,"
+                f"drawbox=x=0:y=ih-60:w=iw:h=60:color=black@0.6:t=fill,"
+                f"drawtext=text='{safe_subtitle}':"
+                f"fontsize=28:fontcolor=white:x=(w-text_w)/2:y=h-45:"
+                f"borderw=2:bordercolor=black"
+            )
+
+            if audio_path and audio_path.exists():
+                # AUDIO-DRIVEN DURATION: Get precise audio length
+                audio_duration = self._get_audio_duration_mutagen(audio_path)
+                if audio_duration <= 0:
+                    audio_duration = await self._get_audio_duration(audio_path)
+
+                if audio_duration <= 0:
+                    logger.error(f"Cannot determine audio duration for {audio_path}")
+                    return False
+
+                logger.info(f"Creating atomic clip with audio-driven duration: {audio_duration:.3f}s")
+
+                # Mix ducked original audio with voiceover
+                # Original at 20% volume, voiceover at 150% volume
+                audio_filter = (
+                    f"[0:a]volume=0.2[bg];"
+                    f"[1:a]volume=1.5[vo];"
+                    f"[bg][vo]amix=inputs=2:duration=first[audio]"
+                )
+
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-ss", str(start_time),  # Seek before input for speed
+                    "-i", str(source_path),
+                    "-i", str(audio_path),
+                    "-t", str(audio_duration),  # Duration = audio duration
+                    "-filter_complex", f"[0:v]{video_filter}[video];{audio_filter}",
+                    "-map", "[video]",
+                    "-map", "[audio]",
+                    "-c:v", "libx264",
+                    "-preset", "fast",
+                    "-crf", "23",
+                    "-pix_fmt", "yuv420p",
+                    "-c:a", "aac",
+                    "-b:a", "128k",
+                    "-shortest",  # Safety: end at shortest stream
+                    str(output_path)
+                ]
+
+            elif use_original_audio:
+                # Original audio mode - use a reasonable fixed duration
+                # This is for "original" segments where we keep source audio
+                # Duration will be controlled by caller
+                logger.info(f"Creating atomic clip with original audio")
+
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-ss", str(start_time),
+                    "-i", str(source_path),
+                    "-vf", video_filter,
+                    "-c:v", "libx264",
+                    "-preset", "fast",
+                    "-crf", "23",
+                    "-pix_fmt", "yuv420p",
+                    "-c:a", "aac",
+                    "-b:a", "128k",
+                    str(output_path)
+                ]
+
+            else:
+                # No audio - silent clip
+                logger.info(f"Creating silent atomic clip")
+
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-ss", str(start_time),
+                    "-i", str(source_path),
+                    "-vf", video_filter,
+                    "-af", "volume=0.5",
+                    "-c:v", "libx264",
+                    "-preset", "fast",
+                    "-crf", "23",
+                    "-pix_fmt", "yuv420p",
+                    "-c:a", "aac",
+                    "-b:a", "128k",
+                    str(output_path)
+                ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+
+            if result.returncode != 0:
+                logger.error(f"Atomic video clip error: {result.stderr[-500:]}")
+                return False
+
+            # Verify output
+            if output_path.exists() and output_path.stat().st_size > 1000:
+                final_duration = await self._get_audio_duration(output_path)
+                logger.info(f"Atomic video clip created: {output_path.name} ({final_duration:.2f}s)")
+                return True
+            else:
+                logger.error(f"Output file missing or too small: {output_path}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Atomic video clip creation error: {e}")
             return False
 
     async def _process_voiceover_segment(
@@ -772,92 +1106,8 @@ class DirectorService:
             logger.error(f"Voiceover segment processing error: {e}")
             return False
 
-    async def _concatenate_with_transition(
-        self,
-        clips: List[str],
-        output_path: Path,
-        temp_dir: Path,
-    ) -> bool:
-        """Concatenate clips using concat filter for better audio-video sync."""
-        try:
-            if not clips:
-                logger.error("No clips to concatenate")
-                return False
-
-            # For single clip, just copy it
-            if len(clips) == 1:
-                import shutil
-                shutil.copy(clips[0], output_path)
-                logger.info(f"Single clip copied to {output_path}")
-                return True
-
-            # Build concat filter inputs
-            # Using filter_complex concat instead of demuxer for better sync
-            filter_parts = []
-            input_args = ["ffmpeg", "-y"]
-
-            # Add all input files
-            for i, clip in enumerate(clips):
-                input_args.extend(["-i", str(Path(clip).absolute())])
-                filter_parts.append(f"[{i}:v][{i}:a]")
-
-            # Build concat filter: n=v:a=1:v=1:a=1
-            concat_filter = "".join(filter_parts) + f"concat=n={len(clips)}:v=1:a=1[v][a]"
-
-            # Complete command
-            input_args.extend([
-                "-filter_complex", concat_filter,
-                "-map", "[v]",
-                "-map", "[a]",
-                "-c:v", "libx264",
-                "-preset", "fast",
-                "-crf", "23",
-                "-pix_fmt", "yuv420p",
-                "-movflags", "+faststart",
-                "-c:a", "aac",
-                "-b:a", "128k",
-                str(output_path.absolute())
-            ])
-
-            result = subprocess.run(input_args, capture_output=True, text=True, timeout=300)
-
-            if result.returncode != 0:
-                logger.error(f"Concatenation error: {result.stderr[-500:]}")
-                return False
-
-            # Verify output file exists and has content
-            if output_path.exists() and output_path.stat().st_size > 1000:
-                # Verify sync
-                try:
-                    verify_cmd = [
-                        "ffprobe", "-v", "error",
-                        "-show_entries", "stream=codec_type,duration:format=duration",
-                        "-of", "json",
-                        str(output_path)
-                    ]
-                    verify_result = subprocess.run(verify_cmd, capture_output=True, text=True, timeout=30)
-                    if verify_result.returncode == 0:
-                        import json
-                        v_data = json.loads(verify_result.stdout)
-                        streams = v_data.get("streams", [])
-                        v_dur = next((float(s.get("duration", 0)) for s in streams if s.get("codec_type") == "video"), 0)
-                        a_dur = next((float(s.get("duration", 0)) for s in streams if s.get("codec_type") == "audio"), 0)
-                        logger.info(f"Final video - Video: {v_dur}s, Audio: {a_dur}s")
-                except:
-                    pass
-
-                logger.info(f"Director cut video created: {output_path} ({output_path.stat().st_size} bytes)")
-                return True
-            else:
-                logger.error(f"Output file too small or missing: {output_path}")
-                return False
-
-        except subprocess.TimeoutExpired:
-            logger.error("Concatenation timeout after 300 seconds")
-            return False
-        except Exception as e:
-            logger.error(f"Concatenation error: {e}")
-            return False
+    # NOTE: _concatenate_with_transition has been replaced by _concatenate_atomic_clips
+    # The old method is removed to avoid confusion
 
     def _escape_ffmpeg_text(self, text: str) -> str:
         """Escape special characters for FFmpeg drawtext filter."""
