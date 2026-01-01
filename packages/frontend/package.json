@@ -11,18 +11,23 @@
     "clean": "rimraf dist"
   },
   "dependencies": {
+    "@types/three": "^0.182.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
     "echarts": "^5.4.3",
     "echarts-for-react": "^3.0.2",
+    "echarts-wordcloud": "^2.1.0",
     "framer-motion": "^11.0.8",
     "html2canvas": "^1.4.1",
     "jspdf": "^3.0.4",
     "lucide-react": "^0.358.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-force-graph-3d": "^1.29.0",
     "react-resizable-panels": "^2.0.19",
     "tailwind-merge": "^2.2.1",
+    "three": "^0.182.0",
+    "three-spritetext": "^1.10.0",
     "zustand": "^4.5.2"
   },
   "devDependencies": {

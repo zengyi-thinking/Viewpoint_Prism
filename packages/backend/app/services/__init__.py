@@ -9,6 +9,7 @@ from .crawler import CrawlerService, get_crawler_service
 from .director import DirectorService, get_director_service
 from .illustrator import IllustratorService, get_illustrator_service
 from .sophnet_service import SophNetService, get_sophnet_service
+from .montage_service import MontageService, get_montage_service
 
 __all__ = [
     "MediaProcessor",
@@ -31,4 +32,6 @@ __all__ = [
     "get_illustrator_service",
     "SophNetService",
     "get_sophnet_service",
+    "MontageService",
+    "get_montage_service",
 ]

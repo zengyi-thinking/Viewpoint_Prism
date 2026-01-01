@@ -394,13 +394,21 @@ async def get_knowledge_stats():
 
 
 # One-Pager Report schemas
+class EvidenceItemSchema(BaseModel):
+    """Evidence image with AI-generated caption."""
+    url: str
+    caption: str
+    related_insight_index: Optional[int] = None
+
+
 class OnePagerData(BaseModel):
     """One-Pager Executive Summary data."""
     headline: str
     tldr: str
     insights: List[str]
     conceptual_image: Optional[str] = None
-    evidence_images: List[str] = []
+    evidence_items: List[EvidenceItemSchema] = []  # New: structured evidence with captions
+    evidence_images: List[str] = []  # Backward compat
     generated_at: str
     source_ids: List[str]  # Changed: support multiple sources
     video_titles: List[str]  # Changed: list of video titles
@@ -459,6 +467,14 @@ async def generate_one_pager(
         tldr=one_pager_result.get("tldr", "暂无摘要"),
         insights=one_pager_result.get("insights", []),
         conceptual_image=one_pager_result.get("conceptual_image"),
+        evidence_items=[
+            EvidenceItemSchema(
+                url=item.get("url", ""),
+                caption=item.get("caption", ""),
+                related_insight_index=item.get("related_insight_index")
+            )
+            for item in one_pager_result.get("evidence_items", [])
+        ],
         evidence_images=one_pager_result.get("evidence_images", []),
         generated_at=one_pager_result.get("generated_at", ""),
         source_ids=one_pager_result.get("source_ids", valid_source_ids),

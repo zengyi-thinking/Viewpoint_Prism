@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useAppStore } from '@/stores/app-store'
-import { Zap, AlertTriangle, Sparkles, RefreshCw, Loader2, Film, Download, Play, Pause, X, Video, BookOpen, Swords, Footprints, Check, Clapperboard, ArrowLeft, FileText, Network, Scissors, Image, Grid3X3 } from 'lucide-react'
+import { Zap, AlertTriangle, Sparkles, RefreshCw, Loader2, Film, Download, Play, Pause, X, Video, BookOpen, Swords, Footprints, Check, Clapperboard, ArrowLeft, FileText, Scissors, Image, Grid3X3 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import * as echarts from 'echarts'
 import type { Conflict, DebateTask, GraphNode, DirectorTask, Persona } from '@/types'
 import { FeatureCard } from '@/components/ui/FeatureCard'
 import { OnePager } from '@/components/ui/OnePager'
+import { NebulaPanel } from '@/components/ui/NebulaPanel'
 
 // Persona configurations for UI
 const PERSONAS: Array<{ id: Persona; name: string; emoji: string; description: string }> = [
@@ -1407,6 +1408,15 @@ function ReportView() {
   )
 }
 
+// Nebula View (Highlight Nebula - 3D Knowledge Galaxy)
+function NebulaView() {
+  return (
+    <div className="absolute inset-0 overflow-hidden bg-[#030712]">
+      <NebulaPanel />
+    </div>
+  )
+}
+
 // Studio Dashboard View
 function StudioDashboard({ onNavigate }: { onNavigate: (view: string) => void }) {
   const { language, fetchAnalysis, isAnalyzing, selectedSourceIds } = useAppStore()
@@ -1447,12 +1457,12 @@ function StudioDashboard({ onNavigate }: { onNavigate: (view: string) => void })
       glowColor: 'bg-gradient-to-br from-red-600/20 to-orange-600/20',
     },
     {
-      id: 'graph',
-      icon: Network,
-      title: language === 'zh' ? '全网混剪' : 'Entity Supercut',
-      description: language === 'zh' ? '基于知识图谱生成实体高光集锦' : 'Generate entity highlights from knowledge graph',
-      color: 'bg-gradient-to-br from-blue-600 to-cyan-600',
-      glowColor: 'bg-gradient-to-br from-blue-600/20 to-cyan-600/20',
+      id: 'nebula',
+      icon: Sparkles,
+      title: language === 'zh' ? '高光星云' : 'Highlight Nebula',
+      description: language === 'zh' ? '3D 知识星云，点击概念生成高光混剪' : '3D knowledge nebula, click to generate highlights',
+      color: 'bg-gradient-to-br from-cyan-600 to-purple-600',
+      glowColor: 'bg-gradient-to-br from-cyan-600/20 to-purple-600/20',
     },
     {
       id: 'timeline',
@@ -1574,7 +1584,7 @@ export function AnalysisPanel() {
           {/* Content */}
           <div className="flex-1 overflow-hidden relative bg-[#121214]">
             {activeView === 'conflicts' && <ConflictsView />}
-            {activeView === 'graph' && <GraphView />}
+            {activeView === 'nebula' && <NebulaView />}
             {activeView === 'timeline' && <TimelineView />}
             {activeView === 'report' && <ReportView />}
           </div>
