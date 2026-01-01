@@ -5,6 +5,8 @@ Phase 6: The Alchemist + Phase 7: Entity Supercut
 Features:
 1. AI Debate Videos (Phase 6): Script + TTS + Split-screen composition
 2. Entity Supercut (Phase 7): Knowledge graph entity → Video compilation with watermarks
+
+Uses SophNet DeepSeek-V3.2 for script generation.
 """
 
 import asyncio
@@ -17,6 +19,7 @@ import json
 
 from app.core import get_settings
 from app.services.vector_store import get_vector_store
+from app.services.sophnet_service import get_sophnet_service
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -27,17 +30,17 @@ GENERATED_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class CreatorService:
-    """AI Debate Video Generator Service."""
+    """AI Debate Video Generator Service using SophNet."""
 
     def __init__(self):
-        """Initialize with API settings."""
-        self.api_key = settings.modelscope_api_key
+        """Initialize with SophNet service."""
+        self.sophnet = get_sophnet_service()
         # Task tracking
         self._tasks: Dict[str, Dict[str, Any]] = {}
 
     async def generate_script(self, conflict_data: Dict[str, Any]) -> str:
         """
-        Generate debate introduction script using LLM.
+        Generate debate introduction script using SophNet LLM.
 
         Args:
             conflict_data: Conflict info with viewpoint_a and viewpoint_b
@@ -56,24 +59,17 @@ vs
 请写一段30-50字的激昂开场白，介绍这场风格对决。要求口语化、有悬念。不要带任何markdown格式。"""
 
         try:
-            from openai import OpenAI
-
-            client = OpenAI(
-                api_key=self.api_key,
-                base_url="https://api-inference.modelscope.cn/v1",
-            )
-
-            response = client.chat.completions.create(
-                model="Qwen/Qwen2.5-72B-Instruct",
+            script = await self.sophnet.chat(
                 messages=[
                     {"role": "system", "content": "你是一个专业的电竞解说员，风格热血激昂。"},
                     {"role": "user", "content": prompt}
                 ],
+                model="DeepSeek-V3.2",
                 max_tokens=200,
                 temperature=0.8,
             )
 
-            script = response.choices[0].message.content.strip()
+            script = script.strip()
             logger.info(f"Generated script: {script[:50]}...")
             return script
 

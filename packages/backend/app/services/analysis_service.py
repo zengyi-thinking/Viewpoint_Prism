@@ -1,38 +1,36 @@
 """
 Analysis Service
 Generates AI-powered analysis artifacts: conflicts, timeline, and knowledge graph.
+
+Uses SophNet DeepSeek-V3.2 for all AI analysis tasks.
 """
 
 import json
 import hashlib
 import logging
 from typing import List, Dict, Any, Optional
-from openai import OpenAI
 
 from app.core import get_settings
 from app.services.vector_store import get_vector_store
+from app.services.sophnet_service import get_sophnet_service
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
 class AnalysisService:
-    """AI-powered analysis generation service."""
+    """AI-powered analysis generation service using SophNet."""
 
     def __init__(self):
-        """Initialize with ModelScope API client."""
-        self.client = OpenAI(
-            api_key=settings.modelscope_api_key,
-            base_url="https://api-inference.modelscope.cn/v1"
-        )
-        self.model = settings.modelscope_model
+        """Initialize with SophNet service."""
+        self.sophnet = get_sophnet_service()
         self.vector_store = get_vector_store()
 
         # Simple in-memory cache
         self._cache: Dict[str, Any] = {}
 
-        if not settings.modelscope_api_key:
-            logger.warning("ModelScope API key not configured!")
+        if not settings.sophnet_api_key:
+            logger.warning("SophNet API key not configured!")
 
     def _get_cache_key(self, operation: str, source_ids: List[str]) -> str:
         """Generate cache key from operation and source IDs."""
@@ -113,7 +111,7 @@ class AnalysisService:
             logger.info(f"Returning cached conflicts for {source_ids}")
             return self._cache[cache_key]
 
-        if not settings.modelscope_api_key:
+        if not settings.sophnet_api_key:
             return {"conflicts": [], "message": "AI服务未配置"}
 
         try:
@@ -165,17 +163,22 @@ class AnalysisService:
 
 请只输出JSON数组，不要包含其他文字："""
 
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
+            content = await self.sophnet.chat(
+                messages=[
+                    {"role": "system", "content": "你是一个专业的视频分析AI，擅长识别观点分歧和信息差异。"},
+                    {"role": "user", "content": prompt}
+                ],
+                model="DeepSeek-V3.2",
                 temperature=0.5,
                 max_tokens=2000,
             )
 
-            content = response.choices[0].message.content
-
             # Parse JSON from response
             conflicts = self._parse_json_response(content, [])
+
+            # Post-process: Ensure source_id and source_name are correct
+            # LLM may return placeholder IDs, so we map them to actual source IDs
+            conflicts = self._fix_conflict_sources(conflicts, source_docs)
 
             result = {"conflicts": conflicts}
 
@@ -192,14 +195,16 @@ class AnalysisService:
     async def generate_timeline(
         self,
         source_id: str,
-        use_cache: bool = True
+        use_cache: bool = True,
+        quality_check: bool = True
     ) -> Dict[str, Any]:
         """
-        Generate smart timeline for a video.
+        Generate smart timeline for a video with optional quality review.
 
         Args:
             source_id: Video source ID
             use_cache: Whether to use cached results
+            quality_check: Whether AI should review and filter low-quality events
 
         Returns:
             Dict with timeline events
@@ -210,7 +215,7 @@ class AnalysisService:
             logger.info(f"Returning cached timeline for {source_id}")
             return self._cache[cache_key]
 
-        if not settings.modelscope_api_key:
+        if not settings.sophnet_api_key:
             return {"timeline": [], "message": "AI服务未配置"}
 
         try:
@@ -235,6 +240,23 @@ class AnalysisService:
 
             content_summary = "\n".join(content_parts)
 
+            # Enhanced prompt for quality-conscious timeline generation
+            quality_instruction = ""
+            if quality_check:
+                quality_instruction = """
+## 质量审查标准
+作为专业内容审查员，请确保每个时间节点：
+1. **内容明确**: 必须有清晰的情节或事件发生，不是模糊或无效内容
+2. **视觉价值**: 画面包含有意义的动作、对话或关键信息
+3. **避免重复**: 不要选择内容相似或重复的时间段
+4. **节奏把控**: STORY 和 COMBAT 交替出现，保持观看节奏
+排除标准：
+- 纯黑屏/加载画面
+- 重复的操作或对话
+- 无意义的等待时间
+- 模糊不清的情节
+"""
+
             prompt = f"""请为以下视频生成智能时间轴，提取关键事件节点并进行分类。
 
 ## 视频标题: {video_title}
@@ -242,15 +264,16 @@ class AnalysisService:
 
 ## 视频内容（按时间顺序）：
 {content_summary}
-
+{quality_instruction}
 ## 任务要求：
-1. 提取8-15个关键时间节点
+1. 提取10-18个关键时间节点（质量优先于数量）
 2. 为每个事件分类：
    - STORY: 剧情/对话/过场动画/重要信息讲解
    - COMBAT: BOSS战/战斗/打怪/激烈操作
    - EXPLORE: 跑图/收集/闲聊/无关紧要的内容（低优先级）
-3. 标记特别重要的节点为关键时刻
-4. 时间格式为 MM:SS
+3. 标记特别重要的节点为关键时刻（is_key_moment: true）
+4. 时间格式为 MM:SS，同时提供精确的秒数（timestamp）
+5. 每个片段建议时长 8-15 秒，确保内容完整
 
 ## 输出格式（必须是有效JSON数组）：
 ```json
@@ -263,22 +286,42 @@ class AnalysisService:
     "description": "事件描述（30字内）",
     "source_id": "{source_id}",
     "is_key_moment": true或false,
-    "event_type": "STORY或COMBAT或EXPLORE"
+    "event_type": "STORY或COMBAT或EXPLORE",
+    "quality_score": 1-10的质量评分（10为最高质量）
   }}
 ]
 ```
 
 请只输出JSON数组："""
 
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
+            content = await self.sophnet.chat(
+                messages=[
+                    {"role": "system", "content": "你是一个专业的视频内容审查AI，擅长提取高质量关键节点并进行分类。你严格把关内容质量，确保每个时间节点都有明确的观看价值。"},
+                    {"role": "user", "content": prompt}
+                ],
+                model="DeepSeek-V3.2",
                 temperature=0.5,
-                max_tokens=1500,
+                max_tokens=2000,
             )
-
-            content = response.choices[0].message.content
             timeline = self._parse_json_response(content, [])
+
+            # Post-process: filter out low-quality events if quality_check is enabled
+            if quality_check and timeline:
+                original_count = len(timeline)
+                timeline = [
+                    event for event in timeline
+                    if event.get("quality_score", 5) >= 5  # Keep events with quality 5+
+                ]
+                logger.info(f"Quality check filtered {original_count - len(timeline)} low-quality events")
+
+            # Ensure all required fields exist
+            for event in timeline:
+                if "source_id" not in event:
+                    event["source_id"] = source_id
+                if "is_key_moment" not in event:
+                    event["is_key_moment"] = False
+                if "quality_score" not in event:
+                    event["quality_score"] = 7
 
             result = {"timeline": timeline, "source_id": source_id}
 
@@ -313,7 +356,7 @@ class AnalysisService:
             logger.info(f"Returning cached graph for {source_ids}")
             return self._cache[cache_key]
 
-        if not settings.modelscope_api_key:
+        if not settings.sophnet_api_key:
             return {"nodes": [], "links": [], "message": "AI服务未配置"}
 
         try:
@@ -363,14 +406,15 @@ class AnalysisService:
 
 请只输出JSON对象："""
 
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
+            content = await self.sophnet.chat(
+                messages=[
+                    {"role": "system", "content": "你是一个专业的知识图谱构建AI，擅长从文本中提取实体和关系。"},
+                    {"role": "user", "content": prompt}
+                ],
+                model="DeepSeek-V3.2",
                 temperature=0.5,
                 max_tokens=2000,
             )
-
-            content = response.choices[0].message.content
             graph = self._parse_json_response(content, {"nodes": [], "links": []})
 
             # Handle case where LLM returns a list instead of object
@@ -513,6 +557,60 @@ class AnalysisService:
         json_str = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', json_str)
 
         return json_str
+
+    def _fix_conflict_sources(
+        self,
+        conflicts: List[Dict[str, Any]],
+        source_docs: Dict[str, List[Dict]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Fix conflict data to ensure source_id and source_name are correct.
+
+        LLM may return placeholder IDs like 'source-a' or 'source-b' instead of actual IDs.
+        This method maps them to the correct source IDs from source_docs.
+        """
+        if not conflicts:
+            return conflicts
+
+        # Build a mapping from source index (0, 1) to actual source_id
+        source_ids_list = list(source_docs.keys())
+        source_names = {}
+
+        for source_id, docs in source_docs.items():
+            if docs:
+                metadata = docs[0].get("metadata", {})
+                source_names[source_id] = metadata.get("video_title", source_id)
+
+        # Pattern to detect placeholder source IDs
+        placeholder_patterns = ["source-a", "source-b", "source_a", "source_b", ":source-a", ":source-b"]
+
+        for conflict in conflicts:
+            viewpoint_a = conflict.get("viewpoint_a", {})
+            viewpoint_b = conflict.get("viewpoint_b", {})
+
+            # Fix viewpoint_a
+            a_source_id = viewpoint_a.get("source_id", "")
+            if any(p in a_source_id.lower() for p in placeholder_patterns):
+                # Map to first source
+                if len(source_ids_list) > 0:
+                    conflict["viewpoint_a"]["source_id"] = source_ids_list[0]
+                    conflict["viewpoint_a"]["source_name"] = source_names.get(source_ids_list[0], "视频A")
+
+            # Fix viewpoint_b
+            b_source_id = viewpoint_b.get("source_id", "")
+            if any(p in b_source_id.lower() for p in placeholder_patterns):
+                # Map to second source (or first if only one source)
+                target_idx = 1 if len(source_ids_list) > 1 else 0
+                conflict["viewpoint_b"]["source_id"] = source_ids_list[target_idx]
+                conflict["viewpoint_b"]["source_name"] = source_names.get(source_ids_list[target_idx], "视频B")
+
+            # Also fix missing source_name
+            if not viewpoint_a.get("source_name") and viewpoint_a.get("source_id") in source_names:
+                conflict["viewpoint_a"]["source_name"] = source_names[viewpoint_a["source_id"]]
+            if not viewpoint_b.get("source_name") and viewpoint_b.get("source_id") in source_names:
+                conflict["viewpoint_b"]["source_name"] = source_names[viewpoint_b["source_id"]]
+
+        return conflicts
 
     def clear_cache(self, source_ids: Optional[List[str]] = None):
         """Clear cached analysis results."""

@@ -542,17 +542,42 @@ class DirectorService:
             )
 
             if voiceover_path and voiceover_path.exists():
-                # Mix ducked original audio with voiceover
-                audio_filter = (
-                    f"[0:a]atrim=start={start_time}:duration={duration},asetpts=PTS-STARTPTS,volume=0.1[bg];"
-                    f"[1:a]volume=1.5[vo];"
-                    f"[bg][vo]amix=inputs=2:duration=longest[audio]"
-                )
+                # Get voiceover duration to check if we need to extend it
+                probe_cmd = [
+                    "ffprobe", "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    str(voiceover_path)
+                ]
+                try:
+                    vo_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=10)
+                    vo_duration = float(vo_result.stdout.strip()) if vo_result.stdout.strip() else 0
+                except:
+                    vo_duration = 0
+
+                # Build audio filter based on voiceover duration
+                # If voiceover is shorter than target duration, loop it or extend with silence
+                if vo_duration < duration * 0.8:  # If voiceover is significantly shorter
+                    # Loop voiceover to match duration, then mix
+                    audio_filter = (
+                        f"[0:a]atrim=start={start_time}:duration={duration},asetpts=PTS-STARTPTS,volume=0.15[bg];"
+                        f"[1:a]aloop=loop=-1:size=2e+09[vo_loop];"
+                        f"[vo_loop]atrim=0:{duration},asetpts=PTS-STARTPTS,volume=1.3[vo];"
+                        f"[bg][vo]amix=inputs=2:duration=first:dropout_transition=2[audio]"
+                    )
+                else:
+                    # Voiceover is long enough, use normal mix
+                    audio_filter = (
+                        f"[0:a]atrim=start={start_time}:duration={duration},asetpts=PTS-STARTPTS,volume=0.15[bg];"
+                        f"[1:a]atrim=0:{duration},asetpts=PTS-STARTPTS,volume=1.3[vo];"
+                        f"[bg][vo]amix=inputs=2:duration=first[audio]"
+                    )
 
                 cmd = [
                     "ffmpeg", "-y",
                     "-ss", str(start_time),
                     "-i", str(source_path),
+                    "-stream_loop", "-1",  # Loop voiceover input if needed
                     "-i", str(voiceover_path),
                     "-filter_complex", f"[0:v]{video_filter}[video];{audio_filter}",
                     "-map", "[video]",
@@ -566,7 +591,7 @@ class DirectorService:
                     str(output_path)
                 ]
             else:
-                # No voiceover available, just duck original audio
+                # No voiceover available, just use original audio at normal volume
                 cmd = [
                     "ffmpeg", "-y",
                     "-ss", str(start_time),
@@ -600,7 +625,7 @@ class DirectorService:
         output_path: Path,
         temp_dir: Path,
     ) -> bool:
-        """Concatenate clips with simple fade transitions."""
+        """Concatenate clips with re-encoding for better compatibility."""
         try:
             # Create concat file
             concat_file = temp_dir / "concat.txt"
@@ -609,13 +634,22 @@ class DirectorService:
                     abs_path = str(Path(clip_path).absolute()).replace(chr(92), '/')
                     f.write(f"file '{abs_path}'\n")
 
-            # Simple concat (xfade is complex and may fail)
+            # Re-encode for better compatibility instead of -c copy
+            # This ensures all clips are in the same format
             cmd = [
                 "ffmpeg", "-y",
                 "-f", "concat",
                 "-safe", "0",
                 "-i", str(concat_file.absolute()),
-                "-c", "copy",
+                # Video codec settings
+                "-c:v", "libx264",
+                "-preset", "fast",
+                "-crf", "23",
+                "-pix_fmt", "yuv420p",  # Ensure compatibility with most players
+                "-movflags", "+faststart",  # Enable fast start for web playback
+                # Audio codec settings
+                "-c:a", "aac",
+                "-b:a", "128k",
                 str(output_path.absolute())
             ]
 
@@ -625,9 +659,17 @@ class DirectorService:
                 logger.error(f"Concatenation error: {result.stderr[-500:]}")
                 return False
 
-            logger.info(f"Director cut video created: {output_path}")
-            return True
+            # Verify output file exists and has content
+            if output_path.exists() and output_path.stat().st_size > 1000:
+                logger.info(f"Director cut video created: {output_path} ({output_path.stat().st_size} bytes)")
+                return True
+            else:
+                logger.error(f"Output file too small or missing: {output_path}")
+                return False
 
+        except subprocess.TimeoutExpired:
+            logger.error("Concatenation timeout after 300 seconds")
+            return False
         except Exception as e:
             logger.error(f"Concatenation error: {e}")
             return False

@@ -13,6 +13,8 @@ from app.services.sophnet_service import get_sophnet_service
 
 logger = logging.getLogger(__name__)
 
+# Force reload timestamp - 2026-01-01 12:35:00
+
 # Try to import whisper for local ASR
 _WHISPER_AVAILABLE = False
 _whisper_model = None

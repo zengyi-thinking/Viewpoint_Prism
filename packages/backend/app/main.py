@@ -40,6 +40,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"ChromaDB directory: {CHROMA_DIR.absolute()}")
     logger.info(f"Generated directory: {GENERATED_DIR.absolute()}")
     logger.info(f"DashScope API Key configured: {'Yes' if settings.dashscope_api_key else 'No'}")
+    logger.info("RELOAD 2026-01-01 12:35:30")
     yield
     # Shutdown
     logger.info("Viewpoint Prism API shutting down...")
