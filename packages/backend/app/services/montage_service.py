@@ -4,6 +4,7 @@ Handles concept extraction, nebula structure building, and highlight reel genera
 """
 
 import asyncio
+import hashlib
 import logging
 import os
 import subprocess
@@ -410,17 +411,31 @@ class MontageService:
                 if not source or not source.file_path:
                     continue
 
-                # Find the video file
-                video_path = os.path.join(source.file_path, "video.mp4")
-                if not os.path.exists(video_path):
-                    # Try the file_path directly
-                    if os.path.exists(source.file_path):
-                        video_path = source.file_path
-                    else:
-                        continue
+                # Find the video file - check if file_path is already a file or a directory
+                video_path = None
+                if os.path.isfile(source.file_path):
+                    # file_path is already the video file
+                    video_path = source.file_path
+                else:
+                    # file_path is a directory, look for video.mp4 inside
+                    candidate = os.path.join(source.file_path, "video.mp4")
+                    if os.path.isfile(candidate):
+                        video_path = candidate
+
+                if not video_path:
+                    logger.warning(f"Video file not found for source {source_id}: {source.file_path}")
+                    continue
 
                 start = float(seg.get("start", 0))
-                end = float(seg.get("end", start + 10))
+                end = float(seg.get("end", 0))
+
+                # Handle case where both start and end are 0 (missing metadata)
+                if start == 0 and end == 0:
+                    # Use a reasonable default clip length
+                    end = start + 10.0
+                elif end <= start:
+                    end = start + 10.0
+
                 duration = min(end - start, max_duration - total_duration, 15)  # Max 15s per clip
 
                 if duration > 0:
@@ -436,10 +451,11 @@ class MontageService:
         if not clips:
             return None
 
-        # Generate output path
+        # Generate output path with safe filename (avoid Chinese characters for FFmpeg compatibility)
+        concept_hash = hashlib.md5(concept.encode('utf-8')).hexdigest()[:8]
         output_path = os.path.join(
             self.generated_dir,
-            f"supercut_{concept}_{task_id}.mp4"
+            f"supercut_{concept_hash}_{task_id}.mp4"
         )
 
         # Compose with FFmpeg
