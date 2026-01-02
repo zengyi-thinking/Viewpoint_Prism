@@ -1,6 +1,8 @@
 # 视界棱镜 Viewpoint Prism
 
 > 🔮 **多源视频情报重构系统** | Multi-source Video Intelligence Analysis System
+>
+> **IntuitionX** 
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![React 18](https://img.shields.io/badge/react-18-61dafb.svg)](https://reactjs.org/)
@@ -13,33 +15,37 @@
 视界棱镜是一个**AI驱动的视频情报分析平台**，将非结构化视频内容转化为结构化情报。
 
 ### 🎯 多源对比分析
+
 - 上传**多个关于同一主题的视频**（如游戏攻略、评测对比）
 - AI 自动提取关键信息，发现**观点分歧与事实矛盾**
 - 红色/蓝色视角对比，呈现清晰的观点碰撞
 
 ### 🕸️ 知识图谱构建
+
 - 从视频中智能抽取**实体和关系**（人物、物品、地点、BOSS等）
 - 可视化呈现实体网络
 - 点击节点即可**追溯到原始视频片段**
 
 ### 📅 智能时间轴
+
 - AI 自动识别关键事件节点
 - 分类标记：剧情(COMBAT)、战斗(STORY)、探索(EXPLORE)
 - 质量评分筛选，避免无效片段
 
 ### 💬 RAG 智能对话
+
 - 基于视频内容的**向量检索问答**
 - 回答附带**时间戳引用**，可一键跳转
 - 支持多视频源综合回答
 
 ### 🎬 AI 创意生成
 
-| 功能 | 描述 |
-|------|------|
+| 功能                  | 描述                                   |
+| --------------------- | -------------------------------------- |
 | **AI 辩论视频** | 分屏对比 + AI 解说，生成"红蓝对决"视频 |
-| **实体蒙太奇** | 搜索实体相关片段，自动合成混剪 |
-| **智能浓缩** | 提取精华片段，生成 2-5 分钟digest |
-| **一页纸简报** | AI 生成的杂志风格决策摘要 + 概念配图 |
+| **实体蒙太奇**  | 搜索实体相关片段，自动合成混剪         |
+| **智能浓缩**    | 提取精华片段，生成 2-5 分钟digest      |
+| **一页纸简报**  | AI 生成的杂志风格决策摘要 + 概念配图   |
 
 ---
 
@@ -102,6 +108,7 @@ pnpm dev
 ## 📦 技术栈
 
 ### Frontend
+
 - **React 18** + TypeScript + Vite
 - **Tailwind CSS** + shadcn/ui
 - **Zustand** 状态管理
@@ -110,6 +117,7 @@ pnpm dev
 - **react-resizable-panels** 面板布局
 
 ### Backend
+
 - **FastAPI** (Python) + Uvicorn
 - **SQLite** + SQLAlchemy
 - **ChromaDB** 向量存储
