@@ -262,6 +262,33 @@ class VectorStore:
             logger.error(f"Search failed: {e}")
             return []
 
+    def get_all_documents(self) -> List[Dict[str, Any]]:
+        """
+        Get all documents from the vector store.
+
+        Returns:
+            List of all documents with metadata
+        """
+        try:
+            results = self.collection.get(
+                include=["documents", "metadatas"]
+            )
+
+            documents = []
+            if results["documents"]:
+                for i, doc in enumerate(results["documents"]):
+                    documents.append({
+                        "text": doc,
+                        "metadata": results["metadatas"][i] if results["metadatas"] else {},
+                    })
+
+            logger.info(f"Retrieved {len(documents)} total documents from vector store")
+            return documents
+
+        except Exception as e:
+            logger.error(f"Failed to get all documents: {e}")
+            return []
+
     def get_source_documents(self, source_id: str) -> List[Dict[str, Any]]:
         """
         Get all documents for a specific source.

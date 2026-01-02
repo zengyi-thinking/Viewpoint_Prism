@@ -203,19 +203,22 @@ class MontageService:
         """Search for video segments related to a concept."""
         vector_store = get_vector_store()
 
-        # Search in vector store
-        results = vector_store.search(concept, top_k=top_k)
+        # Search in vector store (use n_results parameter)
+        results = vector_store.search(concept, n_results=top_k)
 
         segments = []
         for result in results:
             metadata = result.get("metadata", {})
+            # distance is from vector store, convert to positive score (lower distance = higher score)
+            distance = result.get("distance", 0)
+            score = float(1.0 - min(distance, 1.0))  # Convert distance to 0-1 score
             segments.append({
                 "source_id": metadata.get("source_id", ""),
                 "video_title": metadata.get("title", "Unknown"),
                 "start": metadata.get("start", 0),
                 "end": metadata.get("end", 0),
                 "text": result.get("text", ""),
-                "score": result.get("score", 0),
+                "score": score,
             })
 
         return segments

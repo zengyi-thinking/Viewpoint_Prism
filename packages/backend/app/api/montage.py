@@ -188,10 +188,29 @@ async def get_highlight_status(task_id: str):
     if not status:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
 
+    # Filter out segments for pending/in-progress tasks to avoid validation issues
+    if status.get("status") not in ("completed", "error"):
+        status = {k: v for k, v in status.items() if k != "segments"}
+
+    # Debug: log the status dict
+    logger.info(f"Task {task_id} status: {status}")
+    logger.info(f"Task {task_id} segments: {status.get('segments')}")
+
     return HighlightTaskResponse(
         task_id=task_id,
         **status,
     )
+
+
+# Debug endpoint - return raw task status
+@router.get("/highlight/{task_id}/debug")
+async def get_task_debug(task_id: str):
+    """Get raw task status for debugging."""
+    montage_service = get_montage_service()
+    status = montage_service.get_task_status(task_id)
+    if not status:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    return {"task_id": task_id, "raw_status": status}
 
 
 # Legacy supercut endpoints (for backward compatibility)
