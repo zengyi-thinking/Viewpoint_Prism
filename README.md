@@ -1,29 +1,65 @@
 # 视界棱镜 Viewpoint Prism
 
-> 🔮 多源视频情报分析系统 | Multi-source Video Intelligence Analysis System
+> 🔮 **多源视频情报重构系统** | Multi-source Video Intelligence Analysis System
+
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![React 18](https://img.shields.io/badge/react-18-61dafb.svg)](https://reactjs.org/)
+[![FastAPI](https://img.shields.io/badge/fastapi-0.109.0-green.svg)](https://fastapi.tiangolo.com/)
 
 ---
 
-## 📖 详细使用教程 / User Manual
+## ✨ 核心特性
 
-**👉 [点击查看操作手册 / Click to view User Manual](docs/USER_MANUAL.md)**
+视界棱镜是一个**AI驱动的视频情报分析平台**，将非结构化视频内容转化为结构化情报。
+
+### 🎯 多源对比分析
+- 上传**多个关于同一主题的视频**（如游戏攻略、评测对比）
+- AI 自动提取关键信息，发现**观点分歧与事实矛盾**
+- 红色/蓝色视角对比，呈现清晰的观点碰撞
+
+### 🕸️ 知识图谱构建
+- 从视频中智能抽取**实体和关系**（人物、物品、地点、BOSS等）
+- 可视化呈现实体网络
+- 点击节点即可**追溯到原始视频片段**
+
+### 📅 智能时间轴
+- AI 自动识别关键事件节点
+- 分类标记：剧情(COMBAT)、战斗(STORY)、探索(EXPLORE)
+- 质量评分筛选，避免无效片段
+
+### 💬 RAG 智能对话
+- 基于视频内容的**向量检索问答**
+- 回答附带**时间戳引用**，可一键跳转
+- 支持多视频源综合回答
+
+### 🎬 AI 创意生成
+
+| 功能 | 描述 |
+|------|------|
+| **AI 辩论视频** | 分屏对比 + AI 解说，生成"红蓝对决"视频 |
+| **实体蒙太奇** | 搜索实体相关片段，自动合成混剪 |
+| **智能浓缩** | 提取精华片段，生成 2-5 分钟digest |
+| **一页纸简报** | AI 生成的杂志风格决策摘要 + 概念配图 |
 
 ---
 
-## 项目简介 / Overview
+## 🏗️ 系统架构
 
-"视界棱镜"是一个视频结构化分析平台，旨在解决长视频内容"理解成本高、信息分散"的问题。
-
-核心理念是 **"多源情报重构"**：用户上传多个关于同一主题的视频（如游戏攻略、科技评测），AI 会自动提取关键信息，生成：
-
-- 🔥 **观点碰撞** - 自动检测不同视频间的观点冲突
-- 🕸️ **知识图谱** - 可视化实体关系网络
-- 📅 **智能时间轴** - 关键事件时间线
-- 💬 **RAG 对话** - 基于视频内容的智能问答（带时间戳引用）
+```
+┌─────────────────────────────────────────────────────────┐
+│                    5 层漏斗式处理架构                      │
+├─────────────────────────────────────────────────────────┤
+│  感知层   │ ASR 音频转写 + VL 视觉理解                     │
+│  对齐层   │ 多模态融合为统一日志                            │
+│  认知层   │ LLM 推理、实体抽取、冲突检测                    │
+│  存储层   │ 向量数据库 + 关系数据库 + 图数据库               │
+│  表现层   │ 前端可视化交互                                 │
+└─────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 快速开始 / Quick Start
+## 🚀 快速开始
 
 ### 环境要求
 
@@ -63,57 +99,50 @@ pnpm dev
 
 ---
 
-## Docker 部署 / Docker Deployment
-
-```bash
-# 构建镜像
-docker-compose build
-
-# 启动服务
-docker-compose up -d
-
-# 访问
-# 前端: http://localhost:5173
-# 后端: http://localhost:8000
-```
-
----
-
-## 技术栈 / Tech Stack
+## 📦 技术栈
 
 ### Frontend
-- React 18 + TypeScript + Vite
-- Tailwind CSS + shadcn/ui
-- Zustand (状态管理)
-- XGPlayer (视频播放)
-- ECharts (图表可视化)
+- **React 18** + TypeScript + Vite
+- **Tailwind CSS** + shadcn/ui
+- **Zustand** 状态管理
+- **XGPlayer** 视频播放
+- **ECharts** 图表可视化
+- **react-resizable-panels** 面板布局
 
 ### Backend
-- FastAPI (Python)
-- SQLite + SQLAlchemy
-- ChromaDB (向量存储)
-- DashScope ASR/VLM
-- ModelScope LLM
+- **FastAPI** (Python) + Uvicorn
+- **SQLite** + SQLAlchemy
+- **ChromaDB** 向量存储
+- **DashScope** ASR/VLM (Paraformer + Qwen-VL)
+- **ModelScope** DeepSeek-V3.2 LLM
+- **FFmpeg** 视频处理
 
 ---
 
-## 项目结构 / Structure
+## 📁 项目结构
 
 ```
 Viewpoint Prism/
 ├── packages/
-│   ├── frontend/          # React 前端
+│   ├── frontend/          # React 前端应用
+│   │   └── src/
+│   │       ├── components/  # UI 组件
+│   │       ├── stores/      # 状态管理
+│   │       └── types/       # 类型定义
 │   └── backend/           # FastAPI 后端
-├── docs/
-│   └── USER_MANUAL.md     # 操作手册
-├── scripts/
-│   └── hard_reset.py      # 硬重置脚本
+│       └── app/
+│           ├── api/         # API 路由
+│           ├── services/    # 业务服务
+│           ├── models/      # 数据模型
+│           └── core/        # 核心配置
+├── scripts/               # 工具脚本
+├── struct_prompt/         # 结构化提示词
 └── README.md
 ```
 
 ---
 
-## 开发工具 / Scripts
+## 🛠️ 开发工具
 
 ```bash
 # 系统硬重置（清除所有数据）
@@ -123,6 +152,12 @@ python scripts/hard_reset.py
 cd packages/backend
 python tests/e2e_test.py
 ```
+
+---
+
+## 📖 详细文档
+
+**[👉 点击查看操作手册 / User Manual](docs/USER_MANUAL.md)**
 
 ---
 
