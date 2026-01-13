@@ -102,12 +102,14 @@ interface AppStore {
   activeTab: AnalysisTab
   language: Language
   panelVisibility: Record<PanelPosition, boolean>
+  showProductPage: boolean
 
   // UI actions
   setActiveTab: (tab: AnalysisTab) => void
   setLanguage: (lang: Language) => void
   togglePanel: (panel: PanelPosition) => void
   setPanelVisibility: (panel: PanelPosition, visible: boolean) => void
+  setShowProductPage: (show: boolean) => void
 
   // === Debate Generation ===
   debateTasks: Record<string, DebateTask>
@@ -201,6 +203,7 @@ export const useAppStore = create<AppStore>()(
           bottom: true,
           right: true,
         },
+        showProductPage: true,  // 默认显示产品页
         debateTasks: {},
         // Phase 7: Entity Supercut state
         entityCard: {
@@ -537,6 +540,9 @@ export const useAppStore = create<AppStore>()(
               [panel]: visible,
             },
           })),
+
+        setShowProductPage: (show) =>
+          set({ showProductPage: show }),
 
         // === Debate Generation Actions ===
         startDebateGeneration: async (conflictId: string, conflict: Conflict) => {

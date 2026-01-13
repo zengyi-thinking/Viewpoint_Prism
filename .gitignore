@@ -53,6 +53,8 @@ packages/backend/data
 coverage/
 .coverage
 htmlcov/
+.claude/
+struct_prompt/
 
 # Misc
 *.bak
