@@ -1,12 +1,11 @@
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.core import get_settings, init_db
-from app.api import router as api_router
+from app.core.router_registry import RouterRegistry
 
 # Configure logging
 logging.basicConfig(
@@ -19,17 +18,17 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 # Data directories
-DATA_DIR = Path(__file__).parent.parent / "data"
-UPLOADS_DIR = DATA_DIR / "uploads"
-TEMP_DIR = DATA_DIR / "temp"
-CHROMA_DIR = DATA_DIR / "chromadb"
+DATA_DIR = settings.resolve_path("data")
+STATIC_DIR = settings.resolve_path(settings.upload_dir).parent
+UPLOADS_DIR = settings.resolve_path(settings.upload_dir)
+TEMP_DIR = settings.resolve_path(settings.temp_dir)
+CHROMA_DIR = settings.resolve_path(settings.chroma_db_dir)
 GENERATED_DIR = DATA_DIR / "generated"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
-    # Startup: Create directories and init database
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
     CHROMA_DIR.mkdir(parents=True, exist_ok=True)
@@ -37,12 +36,11 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info(f"Viewpoint Prism API started on {settings.host}:{settings.port}")
     logger.info(f"Uploads directory: {UPLOADS_DIR.absolute()}")
+    logger.info(f"Static directory: {STATIC_DIR.absolute()}")
     logger.info(f"ChromaDB directory: {CHROMA_DIR.absolute()}")
     logger.info(f"Generated directory: {GENERATED_DIR.absolute()}")
     logger.info(f"DashScope API Key configured: {'Yes' if settings.dashscope_api_key else 'No'}")
-    logger.info("RELOAD 2026-01-01 22:08:00")  # Trigger reload for montage routes
     yield
-    # Shutdown
     logger.info("Viewpoint Prism API shutting down...")
 
 
@@ -62,14 +60,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files for serving uploaded videos
-# Create the directory first to avoid mount error
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+# Mount static files
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/static", StaticFiles(directory=str(DATA_DIR)), name="static")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-# Include API routes
-app.include_router(api_router, prefix="/api")
+# Include API routers from modules (auto-discovery)
+RouterRegistry(app).register_modules(prefix="/api")
 
 
 @app.get("/")

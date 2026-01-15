@@ -8,17 +8,17 @@
  * - 清晰的信息层次
  */
 
-import { useState } from 'react'
-import { ArrowRight, Upload, Sparkles, MessageCircle, FileText, Video, Eye, Link2, Zap } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { Sparkles, Upload, MessageCircle, FileText, Video, Eye, Link2, Zap } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/stores/app-store'
 
-export function ProductPage() {
-  const { setUploadState, setShowProductPage } = useAppStore()
+export default function ProductPage() {
+  const navigate = useNavigate()
+  const { setUploadState } = useAppStore()
 
   const handleStart = () => {
-    // 隐藏产品页，触发上传
-    setShowProductPage(false)
+    // 跳转到主界面并触发上传
+    navigate('/app')
     setTimeout(() => {
       setUploadState({ isUploading: true })
     }, 100)

@@ -5,9 +5,10 @@ import {
 } from 'react-resizable-panels'
 import { useAppStore } from '@/stores/app-store'
 import { Header } from './Header'
-import { SourcesPanel } from '@/components/panels/SourcesPanel'
-import { VideoPlayer, ChatPanel } from '@/components/panels/StagePanel'
-import { AnalysisPanel } from '@/components/panels/AnalysisPanel'
+import { VideoPlayer } from '@/components/panels/StagePanel'
+import { ChatPanel } from '@/features/chat'
+import { SourcesPanel } from '@/features/sources'
+import { AnalysisPanel } from '@/features/analysis'
 import { cn } from '@/lib/utils'
 
 // Resize Handle Component
@@ -37,7 +38,7 @@ function ResizeHandle({
   )
 }
 
-export function MainLayout() {
+export default function MainLayout() {
   const { panelVisibility } = useAppStore()
 
   return (
@@ -64,10 +65,10 @@ export function MainLayout() {
           )}
 
           {/* Center Panel - Stage */}
-          <Panel defaultSize={panelVisibility.right ? 50 : 80} minSize={30}>
+          <Panel defaultSize={panelVisibility.right ? 60 : 80} minSize={30}>
             <PanelGroup direction="vertical" className="h-full">
-              {/* Video Player - Increased default size to ensure controls are visible */}
-              <Panel defaultSize={panelVisibility.bottom ? 55 : 100} minSize={40}>
+              {/* Video Player - 优先给视频播放器更多空间 */}
+              <Panel defaultSize={panelVisibility.bottom ? 65 : 100} minSize={50}>
                 <VideoPlayer />
               </Panel>
 

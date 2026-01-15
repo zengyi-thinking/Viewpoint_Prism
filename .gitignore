@@ -55,6 +55,7 @@ coverage/
 htmlcov/
 .claude/
 struct_prompt/
+vedios/
 
 # Misc
 *.bak
