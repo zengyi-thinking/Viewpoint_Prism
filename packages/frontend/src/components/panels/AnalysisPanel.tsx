@@ -1495,7 +1495,7 @@ function StudioDashboard({ onNavigate }: { onNavigate: (view: string) => void })
   return (
     <div className="h-full overflow-y-auto scroller fade-in">
       {/* Header */}
-      <div className="sticky top-0 z-10 p-5 bg-[#18181b]/95 backdrop-blur-sm border-b border-zinc-800/50">
+      <div className="sticky top-0 z-20 p-5 bg-[#18181b]/95 backdrop-blur-sm border-b border-zinc-800/50">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-bold text-white flex items-center gap-2">

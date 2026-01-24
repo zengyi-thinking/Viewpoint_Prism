@@ -48,7 +48,7 @@ export default function MainLayout() {
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden gap-4">
-        <PanelGroup direction="horizontal" className="flex-1">
+        <PanelGroup direction="horizontal" className="!h-full">
           {/* Left Panel - Sources */}
           {panelVisibility.left && (
             <>
@@ -66,17 +66,19 @@ export default function MainLayout() {
 
           {/* Center Panel - Stage */}
           <Panel defaultSize={panelVisibility.right ? 60 : 80} minSize={30}>
-            <PanelGroup direction="vertical" className="h-full">
-              {/* Video Player - 优先给视频播放器更多空间 */}
-              <Panel defaultSize={panelVisibility.bottom ? 65 : 100} minSize={50}>
-                <VideoPlayer />
+            <PanelGroup direction="vertical" className="!h-full gap-4">
+              {/* Video Player - 占据更多空间 */}
+              <Panel defaultSize={panelVisibility.bottom ? 70 : 100} minSize={40} maxSize={90}>
+                <div className="w-full h-full p-1">
+                  <VideoPlayer />
+                </div>
               </Panel>
 
               {/* Chat Panel */}
               {panelVisibility.bottom && (
                 <>
                   <ResizeHandle direction="horizontal" />
-                  <Panel defaultSize={45} minSize={25} maxSize={60}>
+                  <Panel defaultSize={30} minSize={20} maxSize={50}>
                     <ChatPanel />
                   </Panel>
                 </>

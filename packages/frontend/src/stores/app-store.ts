@@ -35,6 +35,10 @@ interface AppStore {
   currentSourceId: string | null
   sessionStartedAt: string | null
 
+  // 进度条点击分析
+  progressClickHistory: Array<{ time: number; timestamp: number }>
+  analyzeProgressClick: (time: number, duration: number) => Promise<void>
+
   addSource: (source: VideoSource) => void
   removeSource: (id: string) => void
   toggleSourceSelection: (id: string) => void
@@ -195,6 +199,7 @@ export const useAppStore = create<AppStore>()(
         networkSearchTask: null,
         onePagerData: null,
         isGeneratingOnePager: false,
+        progressClickHistory: [],
 
         addSource: (source) =>
           set((state) => ({
@@ -225,15 +230,17 @@ export const useAppStore = create<AppStore>()(
           try {
             const data = await SourceAPI.list()
             const sessionStart = get().sessionStartedAt
-            if (!sessionStart) {
-              set({ sources: [] })
-              return
+            let filteredSources = data.sources
+
+            // 只有当 sessionStartedAt 存在时才过滤
+            if (sessionStart) {
+              const sessionStartTime = new Date(sessionStart).getTime()
+              filteredSources = data.sources.filter((s) => {
+                const createdAt = new Date(s.created_at).getTime()
+                return Number.isNaN(createdAt) || createdAt >= sessionStartTime
+              })
             }
-            const sessionStartTime = new Date(sessionStart).getTime()
-            const filteredSources = data.sources.filter((s) => {
-              const createdAt = new Date(s.created_at).getTime()
-              return Number.isNaN(createdAt) || createdAt >= sessionStartTime
-            })
+
             set({ sources: filteredSources })
             if (filteredSources.length > 0 && !get().currentSourceId) {
               set({
@@ -383,6 +390,52 @@ export const useAppStore = create<AppStore>()(
             isPlaying: true,
             activePlayer: 'main',
           }),
+
+        analyzeProgressClick: async (time, duration) => {
+          const state = get()
+          const now = Date.now()
+
+          // 记录点击历史（保留最近10次）
+          const newHistory = [...state.progressClickHistory, { time, timestamp: now }].slice(-10)
+          set({ progressClickHistory: newHistory })
+
+          // 分析点击模式
+          const recentClicks = newHistory.filter(c => now - c.timestamp < 30000) // 30秒内
+
+          let analysisPrompt = ''
+
+          if (recentClicks.length >= 3) {
+            // 检测是否有重复点击某个区间
+            const times = recentClicks.map(c => c.time)
+            const minTime = Math.min(...times)
+            const maxTime = Math.max(...times)
+            const range = maxTime - minTime
+            const avgTime = times.reduce((a, b) => a + b, 0) / times.length
+
+            // 如果点击集中在某个区间（范围小于总时长的20%）
+            if (range < duration * 0.2) {
+              const startMin = Math.floor(minTime / 60)
+              const startSec = Math.floor(minTime % 60)
+              const endMin = Math.floor(maxTime / 60)
+              const endSec = Math.floor(maxTime % 60)
+
+              analysisPrompt = `我反复查看了 ${startMin}:${String(startSec).padStart(2, '0')} 到 ${endMin}:${String(endSec).padStart(2, '0')} 这段内容，请详细分析这段视频在讲什么？`
+            } else {
+              // 分析从开始到平均点击位置
+              const avgMin = Math.floor(avgTime / 60)
+              const avgSec = Math.floor(avgTime % 60)
+              analysisPrompt = `请帮我分析从视频开始到 ${avgMin}:${String(avgSec).padStart(2, '0')} 这个时间点之前的内容`
+            }
+          } else {
+            // 第一次点击：分析从0到点击位置
+            const min = Math.floor(time / 60)
+            const sec = Math.floor(time % 60)
+            analysisPrompt = `请帮我分析从视频开始到 ${min}:${String(sec).padStart(2, '0')} 这个时间点之前的内容`
+          }
+
+          // 发送到聊天
+          await state.sendChatMessage(analysisPrompt)
+        },
 
         setIsPlaying: (playing) =>
           set({ isPlaying: playing }),

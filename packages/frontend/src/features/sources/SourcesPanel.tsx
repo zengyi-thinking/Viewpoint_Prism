@@ -139,12 +139,12 @@ export function SourcesPanel({ onSelectSource }: SourcesPanelProps) {
   }
 
   return (
-    <div className="flex flex-col h-full bg-gray-900/50">
-      <div className="p-4 border-b border-gray-700/50">
+    <div className="flex flex-col h-full bg-zinc-900/40">
+      <div className="p-4 border-b border-zinc-800/50">
         <h2 className="text-lg font-semibold text-white mb-4">视频源</h2>
 
         <div
-          className="border-2 border-dashed border-gray-600 rounded-lg p-6 text-center hover:border-blue-500/50 transition-colors cursor-pointer"
+          className="border-2 border-dashed border-zinc-700 rounded-lg p-6 text-center hover:border-zinc-600 transition-colors cursor-pointer"
           onDrop={handleDrop}
           onDragOver={handleDragOver}
           onClick={() => fileInputRef.current?.click()}
@@ -156,8 +156,8 @@ export function SourcesPanel({ onSelectSource }: SourcesPanelProps) {
             onChange={handleFileSelect}
             className="hidden"
           />
-          <Upload className="w-8 h-8 mx-auto text-gray-400 mb-2" />
-          <p className="text-sm text-gray-400">
+          <Upload className="w-8 h-8 mx-auto text-zinc-400 mb-2" />
+          <p className="text-sm text-zinc-400">
             {uploadState.isUploading
               ? `上传中 ${uploadState.progress.toFixed(0)}%`
               : '拖拽视频到此处，或点击上传'}
@@ -182,20 +182,20 @@ export function SourcesPanel({ onSelectSource }: SourcesPanelProps) {
 
         <div className="mt-4 flex gap-2">
           <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
               placeholder="搜索视频..."
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-10 pr-4 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+              className="w-full bg-zinc-800/50 border border-zinc-700/50 rounded-lg pl-10 pr-4 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-600"
             />
           </div>
           <button
             onClick={handleSearch}
             disabled={isSearching}
-            className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm disabled:opacity-50"
+            className="px-3 py-2 bg-zinc-700 hover:bg-zinc-600 text-white rounded-lg text-sm disabled:opacity-50"
           >
             {isSearching ? '搜索中...' : '搜索'}
           </button>
@@ -204,7 +204,7 @@ export function SourcesPanel({ onSelectSource }: SourcesPanelProps) {
 
       <div className="flex-1 overflow-y-auto p-2">
         {sources.length === 0 ? (
-          <div className="text-center text-gray-500 py-8">
+          <div className="text-center text-zinc-500 py-8">
             <Video className="w-12 h-12 mx-auto mb-3 opacity-50" />
             <p className="text-sm">暂无视频源</p>
             <p className="text-xs mt-1">上传或搜索视频开始分析</p>
@@ -216,8 +216,8 @@ export function SourcesPanel({ onSelectSource }: SourcesPanelProps) {
                 key={source.id}
                 className={`p-3 rounded-lg border cursor-pointer transition-all ${
                   currentSourceId === source.id
-                    ? 'bg-blue-500/10 border-blue-500/30'
-                    : 'bg-gray-800/50 border-gray-700/30 hover:border-gray-600'
+                    ? 'bg-zinc-800/80 border-zinc-700/50'
+                    : 'bg-zinc-800/30 border-zinc-700/30 hover:border-zinc-600'
                 }`}
                 onClick={(e) => {
                   // Don't trigger when clicking on buttons
@@ -236,14 +236,14 @@ export function SourcesPanel({ onSelectSource }: SourcesPanelProps) {
                     }}
                     className={`flex-shrink-0 mt-0.5 rounded border ${
                       selectedSourceIds.includes(source.id)
-                        ? 'bg-blue-500 border-blue-500 text-white'
-                        : 'border-gray-600 hover:border-blue-500'
+                        ? 'bg-zinc-600 border-zinc-600 text-white'
+                        : 'border-zinc-600 hover:border-zinc-500'
                     }`}
                   >
                     {selectedSourceIds.includes(source.id) ? (
                       <CheckSquare className="w-4 h-4" />
                     ) : (
-                      <Square className="w-4 h-4 text-gray-500" />
+                      <Square className="w-4 h-4 text-zinc-500" />
                     )}
                   </button>
 
@@ -257,11 +257,11 @@ export function SourcesPanel({ onSelectSource }: SourcesPanelProps) {
                         {getStatusText(source.status)}
                       </span>
                       {source.duration && (
-                        <span className="text-xs text-gray-500">
+                        <span className="text-xs text-zinc-500">
                           {formatDuration(source.duration)}
                         </span>
                       )}
-                      <span className="text-xs text-gray-600 capitalize">
+                      <span className="text-xs text-zinc-600 capitalize">
                         {source.platform}
                       </span>
                     </div>
@@ -278,7 +278,7 @@ export function SourcesPanel({ onSelectSource }: SourcesPanelProps) {
                           reprocessSource(source.id)
                         }
                       }}
-                      className="p-1.5 rounded hover:bg-gray-700 text-gray-500 hover:text-blue-400"
+                      className="p-1.5 rounded hover:bg-zinc-700 text-zinc-500 hover:text-zinc-300"
                       title={source.status === 'done' ? '重新分析' : '分析'}
                     >
                       <RefreshCw className="w-4 h-4" />
@@ -288,7 +288,7 @@ export function SourcesPanel({ onSelectSource }: SourcesPanelProps) {
                         e.stopPropagation()
                         deleteSource(source.id)
                       }}
-                      className="p-1.5 rounded hover:bg-gray-700 text-gray-500 hover:text-red-400"
+                      className="p-1.5 rounded hover:bg-zinc-700 text-zinc-500 hover:text-red-400"
                       title="删除"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -301,8 +301,8 @@ export function SourcesPanel({ onSelectSource }: SourcesPanelProps) {
         )}
       </div>
 
-      <div className="p-2 border-t border-gray-700/50">
-        <div className="text-xs text-gray-500 text-center">
+      <div className="p-2 border-t border-zinc-800/50">
+        <div className="text-xs text-zinc-500 text-center">
           {sources.length} 个视频源
         </div>
       </div>

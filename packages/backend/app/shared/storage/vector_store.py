@@ -117,14 +117,14 @@ class VectorStore:
                     collection_name=self.collection_name,
                     field_name="source_id",
                     field_schema=KeywordIndexParams(
-                        type=KeywordIndexType.WORD,
+                        type=KeywordIndexType.KEYWORD,
                     ),
                 )
                 self.client.create_payload_index(
                     collection_name=self.collection_name,
                     field_name="type",
                     field_schema=KeywordIndexParams(
-                        type=KeywordIndexType.WORD,
+                        type=KeywordIndexType.KEYWORD,
                     ),
                 )
                 logger.info("Created payload indexes")
