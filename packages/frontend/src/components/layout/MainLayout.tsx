@@ -8,8 +8,10 @@ import { Header } from './Header'
 import { VideoPlayer } from '@/components/panels/StagePanel'
 import { ChatPanel } from '@/features/chat'
 import { SourcesPanel } from '@/features/sources'
+import { IngestPanel } from '@/features/ingest'
 import { AnalysisPanel } from '@/features/analysis'
 import { cn } from '@/lib/utils'
+import { List, Search } from 'lucide-react'
 
 // Resize Handle Component
 function ResizeHandle({
@@ -39,7 +41,7 @@ function ResizeHandle({
 }
 
 export default function MainLayout() {
-  const { panelVisibility } = useAppStore()
+  const { panelVisibility, leftPanelMode, setLeftPanelMode } = useAppStore()
 
   return (
     <div className="h-screen w-screen flex flex-col p-4 gap-4 text-sm select-none bg-[#050507]">
@@ -49,7 +51,7 @@ export default function MainLayout() {
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden gap-4">
         <PanelGroup direction="horizontal" className="!h-full">
-          {/* Left Panel - Sources */}
+          {/* Left Panel - Sources or Ingest */}
           {panelVisibility.left && (
             <>
               <Panel
@@ -58,7 +60,40 @@ export default function MainLayout() {
                 maxSize={35}
                 className="shrink-0"
               >
-                <SourcesPanel />
+                <div className="flex flex-col h-full bg-zinc-900/40">
+                  {/* Mode Toggle */}
+                  <div className="p-2 border-b border-zinc-800/50 flex gap-1">
+                    <button
+                      onClick={() => setLeftPanelMode('sources')}
+                      className={cn(
+                        'flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors',
+                        leftPanelMode === 'sources'
+                          ? 'bg-zinc-700 text-white'
+                          : 'text-zinc-400 hover:text-zinc-300 hover:bg-zinc-800/50'
+                      )}
+                    >
+                      <List className="w-3 h-3" />
+                      视频源
+                    </button>
+                    <button
+                      onClick={() => setLeftPanelMode('ingest')}
+                      className={cn(
+                        'flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors',
+                        leftPanelMode === 'ingest'
+                          ? 'bg-zinc-700 text-white'
+                          : 'text-zinc-400 hover:text-zinc-300 hover:bg-zinc-800/50'
+                      )}
+                    >
+                      <Search className="w-3 h-3" />
+                      搜索
+                    </button>
+                  </div>
+
+                  {/* Panel Content */}
+                  <div className="flex-1 overflow-hidden">
+                    {leftPanelMode === 'sources' ? <SourcesPanel /> : <IngestPanel />}
+                  </div>
+                </div>
               </Panel>
               <ResizeHandle direction="vertical" />
             </>

@@ -25,6 +25,7 @@ export type * from './nebula'
 export type * from './story'
 
 export type PanelPosition = 'left' | 'bottom' | 'right'
+export type LeftPanelMode = 'sources' | 'ingest'
 export type AnalysisTab = 'conflicts' | 'graph' | 'timeline'
 export type Language = 'zh' | 'en'
 export type ActivePlayer = 'main' | 'debate' | 'supercut' | 'digest' | 'director' | 'nebula' | null

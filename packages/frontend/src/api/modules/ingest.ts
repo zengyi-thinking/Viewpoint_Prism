@@ -1,7 +1,16 @@
 import { api } from '../client'
-import type { SearchRequest } from '@/types/modules/ingest'
+import type {
+  SearchRequest,
+  // Extended types
+  ExtendedSearchRequest,
+  ExtendedSearchResponse,
+  FetchContentRequest,
+  FetchContentResponse,
+  SearchResultItem,
+} from '@/types/modules/ingest'
 
-export interface TaskStatusResponse {
+// Legacy types for backward compatibility
+interface TaskStatusResponse {
   task_id: string
   status: string
   progress: number
@@ -10,7 +19,7 @@ export interface TaskStatusResponse {
   error?: string
 }
 
-export interface PlatformInfo {
+interface PlatformInfo {
   id: string
   name: string
   supported: boolean
@@ -18,6 +27,7 @@ export interface PlatformInfo {
 }
 
 export const IngestAPI = {
+  // Legacy API
   search: async (request: SearchRequest): Promise<{ status: string; message: string; task_id: string }> => {
     return api.post('/ingest/search', request)
   },
@@ -29,4 +39,29 @@ export const IngestAPI = {
   getPlatforms: async (): Promise<{ platforms: PlatformInfo[] }> => {
     return api.get('/ingest/platforms')
   },
+
+  // Extended API
+  extendedSearch: async (request: ExtendedSearchRequest): Promise<ExtendedSearchResponse> => {
+    return api.post<ExtendedSearchResponse>('/ingest/search/extended', request)
+  },
+
+  fetchContent: async (request: FetchContentRequest): Promise<FetchContentResponse> => {
+    return api.post<FetchContentResponse>('/ingest/fetch', request)
+  },
+
+  getExtendedPlatforms: async (): Promise<{ platforms: any[] }> => {
+    return api.get('/ingest/platforms/extended')
+  },
 }
+
+// Re-export types for convenience
+export type {
+  SearchRequest,
+  ExtendedSearchRequest,
+  ExtendedSearchResponse,
+  FetchContentRequest,
+  FetchContentResponse,
+  SearchResultItem,
+}
+
+export type { TaskStatusResponse, PlatformInfo }

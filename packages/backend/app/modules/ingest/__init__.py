@@ -7,6 +7,14 @@ from .schemas import (
     SearchRequest,
     SearchResponse,
     TaskStatusResponse,
+    # Extended schemas
+    ExtendedSearchRequest,
+    ExtendedSearchResponse,
+    SearchResultItem,
+    FetchContentRequest,
+    FetchContentResponse,
+    PlatformEnum,
+    ContentTypeEnum,
 )
 
 __all__ = [
@@ -15,4 +23,12 @@ __all__ = [
     "SearchRequest",
     "SearchResponse",
     "TaskStatusResponse",
+    # Extended
+    "ExtendedSearchRequest",
+    "ExtendedSearchResponse",
+    "SearchResultItem",
+    "FetchContentRequest",
+    "FetchContentResponse",
+    "PlatformEnum",
+    "ContentTypeEnum",
 ]

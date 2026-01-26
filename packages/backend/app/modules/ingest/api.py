@@ -14,6 +14,11 @@ from app.modules.ingest import (
     SearchRequest,
     SearchResponse,
     TaskStatusResponse,
+    # Extended schemas
+    ExtendedSearchRequest,
+    ExtendedSearchResponse,
+    FetchContentRequest,
+    FetchContentResponse,
 )
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
@@ -158,5 +163,98 @@ async def list_supported_platforms():
             {"id": "bili", "name": "Bilibili", "supported": True, "description": "哔哩哔哩"},
             {"id": "yt", "name": "YouTube", "supported": True, "description": "YouTube"},
             {"id": "tiktok", "name": "TikTok", "supported": False, "description": "暂不支持"},
+        ]
+    }
+
+
+# ==================== Extended API endpoints ====================
+
+@router.post("/search/extended", response_model=ExtendedSearchResponse)
+async def extended_search(request: ExtendedSearchRequest):
+    """
+    Extended search supporting multiple platforms and content types.
+
+    Searches multiple platforms concurrently and returns combined results.
+    Supports filtering by content type (video, paper, article).
+    """
+    if not request.query or len(request.query.strip()) == 0:
+        raise HTTPException(status_code=400, detail="搜索关键词不能为空")
+
+    # Convert platform enums to strings
+    platform_names = [p.value for p in request.platforms]
+    content_type = request.content_type.value
+
+    logger.info(f"[Ingest] Extended search: query='{request.query}', platforms={platform_names}")
+
+    try:
+        ingest = get_ingest_service()
+        result = await ingest.multi_platform_search(
+            query=request.query,
+            platforms=platform_names,
+            max_results=request.max_results,
+            content_type=content_type
+        )
+
+        return ExtendedSearchResponse(
+            query=request.query,
+            results=result["results"],
+            total_count=result["total_count"],
+            platforms_searched=result["platforms_searched"],
+            content_type_filter=content_type,
+        )
+
+    except Exception as e:
+        logger.error(f"[Ingest] Extended search error: {e}")
+        raise HTTPException(status_code=500, detail=f"搜索失败: {str(e)}")
+
+
+@router.post("/fetch", response_model=FetchContentResponse)
+async def fetch_content(request: FetchContentRequest):
+    """
+    Fetch and import specific content from a platform.
+
+    Downloads the content and creates a source record in the database.
+    Returns a task ID for tracking progress.
+    """
+    ingest = get_ingest_service()
+    task_id = await ingest.fetch_and_process(
+        content_id=request.content_id,
+        platform=request.platform.value,
+        auto_analyze=request.auto_analyze
+    )
+
+    return FetchContentResponse(
+        task_id=task_id,
+        status="started",
+        message=f"正在获取内容..."
+    )
+
+
+@router.get("/platforms/extended")
+async def list_extended_platforms():
+    """List all supported platforms for extended search."""
+    return {
+        "platforms": [
+            {
+                "id": "bilibili",
+                "name": "Bilibili",
+                "content_type": "video",
+                "supported": True,
+                "description": "哔哩哔哩视频搜索"
+            },
+            {
+                "id": "youtube",
+                "name": "YouTube",
+                "content_type": "video",
+                "supported": True,
+                "description": "YouTube视频搜索"
+            },
+            {
+                "id": "arxiv",
+                "name": "arXiv",
+                "content_type": "paper",
+                "supported": True,
+                "description": "arXiv学术论文搜索"
+            },
         ]
     }

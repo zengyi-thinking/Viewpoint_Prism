@@ -9,6 +9,7 @@ import type {
   AnalysisTab,
   Language,
   PanelPosition,
+  LeftPanelMode,
   UploadState,
   DebateTask,
   SupercutTask,
@@ -85,6 +86,7 @@ interface AppStore {
   activeTab: AnalysisTab
   language: Language
   panelVisibility: Record<PanelPosition, boolean>
+  leftPanelMode: LeftPanelMode
   // @deprecated 现在使用路由系统控制页面显示，不再使用此状态
   showProductPage: boolean
 
@@ -92,6 +94,7 @@ interface AppStore {
   setLanguage: (lang: Language) => void
   togglePanel: (panel: PanelPosition) => void
   setPanelVisibility: (panel: PanelPosition, visible: boolean) => void
+  setLeftPanelMode: (mode: LeftPanelMode) => void
   // @deprecated 现在使用路由系统，不再需要此函数
   setShowProductPage: (show: boolean) => void
 
@@ -182,6 +185,7 @@ export const useAppStore = create<AppStore>()(
           bottom: true,
           right: true,
         },
+        leftPanelMode: 'sources',
         showProductPage: true,
         debateTasks: {},
         entityCard: {
@@ -487,6 +491,9 @@ export const useAppStore = create<AppStore>()(
               [panel]: visible,
             },
           })),
+
+        setLeftPanelMode: (mode) =>
+          set({ leftPanelMode: mode }),
 
         setShowProductPage: (show) =>
           set({ showProductPage: show }),

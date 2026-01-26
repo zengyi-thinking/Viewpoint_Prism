@@ -5,6 +5,7 @@ Analysis service - AI-powered video analysis.
 import json
 import hashlib
 import logging
+import traceback
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from datetime import datetime
@@ -23,8 +24,15 @@ class AnalysisService:
     def __init__(self):
         """Initialize with services."""
         self.sophnet = get_sophnet_service()
-        self.vector_store = get_vector_store()
+        self._vector_store = None  # 延迟初始化
         self._cache: Dict[str, Any] = {}
+
+    @property
+    def vector_store(self):
+        """Lazy load vector store."""
+        if self._vector_store is None:
+            self._vector_store = get_vector_store()
+        return self._vector_store
 
     def _get_cache_key(self, operation: str, source_ids: List[str]) -> str:
         """Generate cache key."""
@@ -384,6 +392,142 @@ class AnalysisService:
             logger.warning(f"Failed to parse timeline. Response: {response[:200]}")
 
         return {"timeline": timeline}
+
+    async def extract_entities_from_source(
+        self,
+        source_id: str
+    ) -> List:
+        """从视频源抽取实体并持久化
+
+        Args:
+            source_id: 视频源ID
+
+        Returns:
+            抽取到的实体列表
+        """
+        from app.core.database import async_session
+        from app.modules.analysis.dao import EntityDAO, EntityMentionDAO
+        from app.models.models import Entity, Evidence
+        from sqlalchemy import select
+
+        async with async_session() as session:
+            entity_dao = EntityDAO(session)
+            mention_dao = EntityMentionDAO(session)
+
+            # 首先尝试从数据库的Evidence表获取转写文本
+            result = await session.execute(
+                select(Evidence)
+                .where(Evidence.source_id == source_id)
+                .where(Evidence.text_content != None)
+                .where(Evidence.text_content != "")
+                .order_by(Evidence.start_time)
+            )
+            evidences = result.scalars().all()
+
+            # 构建文档列表
+            documents = []
+            for ev in evidences:
+                if ev.text_content and ev.text_content.strip():
+                    documents.append({
+                        "text": ev.text_content.strip(),
+                        "metadata": {
+                            "source_id": source_id,
+                            "start": ev.start_time,
+                            "end": ev.end_time,
+                        }
+                    })
+
+            # 如果数据库没有，尝试从向量存储获取
+            if not documents:
+                try:
+                    source_docs = self._get_source_documents([source_id])
+                    documents = source_docs.get(source_id, [])
+                except Exception as e:
+                    logger.warning(f"[AnalysisService] Vector store unavailable: {e}")
+
+            if not documents:
+                logger.warning(f"[AnalysisService] No documents found for source {source_id}")
+                return []
+
+            # 构建文本
+            texts = [d.get("text", "") for d in documents[:20] if d.get("text")]
+            if not texts:
+                logger.warning(f"[AnalysisService] No text content found for source {source_id}")
+                return []
+
+            combined_text = "\n\n".join(texts)
+
+            # 使用LLM抽取实体
+            prompt = f"""从以下内容中提取所有实体（人物、地点、组织、事件等）。
+
+{combined_text[:2000]}
+
+请以JSON格式返回：
+{{
+  "entities": [
+    {{"name": "实体名", "type": "PERSON|LOCATION|ORGANIZATION|EVENT|OTHER", "description": "简短描述"}}
+  ]
+}}
+只返回JSON，不要其他内容。"""
+
+            try:
+                response = await self.sophnet.chat(
+                    messages=[{"role": "user", "content": prompt}],
+                    model="DeepSeek-V3.2"
+                )
+
+                cleaned = self._clean_llm_json(response)
+                data = json.loads(cleaned)
+                entities_data = data.get("entities", [])
+
+                entities = []
+                for entity_data in entities_data:
+                    name = entity_data.get("name", "").strip()
+                    if not name:
+                        continue
+
+                    # 检查是否已存在
+                    existing = await entity_dao.find_by_name(name)
+                    if existing:
+                        # 更新提及次数和时间
+                        existing[0].mention_count += 1
+                        existing[0].last_seen_at = datetime.utcnow()
+                        entities.append(existing[0])
+
+                        # 创建新的提及记录
+                        await mention_dao.create(
+                            entity_id=existing[0].id,
+                            source_id=source_id,
+                            timestamp=documents[0].get("metadata", {}).get("start", 0),
+                            context=documents[0].get("text", "")[:200]
+                        )
+                        continue
+
+                    # 创建新实体
+                    entity = await entity_dao.create(
+                        name=name,
+                        type=entity_data.get("type", "OTHER"),
+                        description=entity_data.get("description", ""),
+                        canonical_name=name.lower()
+                    )
+                    entities.append(entity)
+
+                    # 创建提及记录
+                    await mention_dao.create(
+                        entity_id=entity.id,
+                        source_id=source_id,
+                        timestamp=documents[0].get("metadata", {}).get("start", 0),
+                        context=documents[0].get("text", "")[:200]
+                    )
+
+                await session.commit()
+                logger.info(f"[AnalysisService] Extracted {len(entities)} entities from source {source_id}")
+                return entities
+
+            except Exception as e:
+                logger.error(f"[AnalysisService] Failed to extract entities: {e}")
+                logger.error(traceback.format_exc())
+                return []
 
     async def generate_analysis(
         self,

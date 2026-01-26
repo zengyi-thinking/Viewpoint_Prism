@@ -52,30 +52,113 @@ class BaseDAO(Generic[ModelType]):
         return query
 
     async def get(self, id: str) -> Optional[ModelType]:
-        """Get record by ID."""
-        result = await self.session.execute(
-            select(self.model).where(self.model.id == id)
-        )
-        return result.scalar_one_or_none()
+        """Get record by ID. Compatible with aiosqlite."""
+        from sqlalchemy import text
+
+        query_sql = f"SELECT * FROM {self.model.__tablename__} WHERE id = :id LIMIT 1"
+        result = await self.session.execute(text(query_sql), {"id": id})
+        row = result.fetchone()
+
+        if row is None:
+            return None
+
+        # 将Row对象转换为模型实例
+        return self._row_to_model(row)
 
     async def get_by(self, **filters) -> Optional[ModelType]:
-        """Get single record by field filters."""
-        query = self._build_query(**filters)
-        result = await self.session.execute(query)
-        return result.scalar_one_or_none()
+        """Get single record by field filters. Compatible with aiosqlite."""
+        from sqlalchemy import text
+
+        if not filters:
+            return None
+
+        # 构建WHERE子句
+        conditions = []
+        params = {}
+        for key, value in filters.items():
+            if hasattr(self.model, key):
+                conditions.append(f"{key} = :{key}")
+                params[key] = value
+
+        if not conditions:
+            return None
+
+        where_clause = f"WHERE {' AND '.join(conditions)}"
+        query_sql = f"SELECT * FROM {self.model.__tablename__} {where_clause} LIMIT 1"
+
+        result = await self.session.execute(text(query_sql), params)
+        row = result.fetchone()
+
+        if row is None:
+            return None
+
+        # 将Row对象转换为模型实例
+        return self._row_to_model(row)
+
+    def _row_to_model(self, row) -> Optional[ModelType]:
+        """将数据库Row对象转换为模型实例"""
+        if row is None:
+            return None
+
+        # 获取模型的列名
+        column_names = [c.name for c in self.model.__table__.columns]
+
+        # 将Row对象映射为字典
+        data = {column_names[i]: row[i] for i in range(len(column_names))}
+
+        # 创建模型实例
+        return self.model(**data)
 
     async def get_all(self, limit: int = 100, offset: int = 0) -> List[ModelType]:
-        """Get all records with pagination."""
-        result = await self.session.execute(
-            select(self.model).limit(limit).offset(offset)
-        )
-        return list(result.scalars().all())
+        """Get all records with pagination.
+
+        Compatible with aiosqlite by using text() for queries.
+        """
+        from sqlalchemy import text
+
+        query_sql = f"SELECT * FROM {self.model.__tablename__} ORDER BY created_at DESC LIMIT {limit} OFFSET {offset}"
+        result = await self.session.execute(text(query_sql))
+        rows = result.fetchall()
+
+        # 将Row对象转换为模型实例列表
+        return [self._row_to_model(row) for row in rows]
 
     async def list(self, **filters) -> List[ModelType]:
-        """Get records matching filters."""
-        query = self._build_query(**filters)
-        result = await self.session.execute(query)
-        return list(result.scalars().all())
+        """Get records matching filters.
+
+        Compatible with aiosqlite by using text() for queries.
+        """
+        from sqlalchemy import text
+
+        if filters:
+            # 构建WHERE子句
+            conditions = []
+            params = {}
+            for key, value in filters.items():
+                if hasattr(self.model, key):
+                    if isinstance(value, (list, tuple)):
+                        placeholders = ",".join([f":{key}_{i}" for i in range(len(value))])
+                        conditions.append(f"{key} IN ({placeholders})")
+                        for i, v in enumerate(value):
+                            params[f"{key}_{i}"] = v
+                    else:
+                        conditions.append(f"{key} = :{key}")
+                        params[key] = value
+
+            where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            order_clause = f"ORDER BY created_at DESC"
+
+            # 构建完整SQL
+            query_sql = f"SELECT * FROM {self.model.__tablename__} {where_clause} {order_clause}"
+
+            result = await self.session.execute(text(query_sql), params)
+            rows = result.fetchall()
+
+            # 将Row对象转换为模型实例列表
+            return [self._row_to_model(row) for row in rows]
+        else:
+            # 无过滤条件，使用get_all
+            return await self.get_all()
 
     async def create(self, **kwargs) -> ModelType:
         """Create new record."""
@@ -122,12 +205,32 @@ class BaseDAO(Generic[ModelType]):
         return result.rowcount
 
     async def count(self, **filters) -> int:
-        """Count records matching filters."""
-        query = self._build_query(**filters)
-        result = await self.session.execute(
-            select(self.model.id).select_from(query.subquery())
-        )
-        return len(result.fetchall())
+        """Count records matching filters. Compatible with aiosqlite."""
+        from sqlalchemy import text
+
+        if filters:
+            # 构建WHERE子句
+            conditions = []
+            params = {}
+            for key, value in filters.items():
+                if hasattr(self.model, key):
+                    if isinstance(value, (list, tuple)):
+                        placeholders = ",".join([f":{key}_{i}" for i in range(len(value))])
+                        conditions.append(f"{key} IN ({placeholders})")
+                        for i, v in enumerate(value):
+                            params[f"{key}_{i}"] = v
+                    else:
+                        conditions.append(f"{key} = :{key}")
+                        params[key] = value
+
+            where_clause = f"WHERE {' AND '.join(conditions)}"
+            query_sql = f"SELECT COUNT(*) FROM {self.model.__tablename__} {where_clause}"
+            result = await self.session.execute(text(query_sql), params)
+        else:
+            query_sql = f"SELECT COUNT(*) FROM {self.model.__tablename__}"
+            result = await self.session.execute(text(query_sql))
+
+        return result.scalar() or 0
 
     async def exists(self, id: str) -> bool:
         """Check if record exists by ID."""
@@ -135,13 +238,21 @@ class BaseDAO(Generic[ModelType]):
         return record is not None
 
     async def first(self, order_by: str = "created_at", descending: bool = True) -> Optional[ModelType]:
-        """Get first record ordered by field."""
-        order_func = getattr(self.model, order_by)
-        if descending:
-            order_func = order_func.desc()
-        else:
-            order_func = order_func.asc()
-        result = await self.session.execute(
-            select(self.model).order_by(order_func).limit(1)
-        )
-        return result.scalar_one_or_none()
+        """Get first record ordered by field. Compatible with aiosqlite."""
+        from sqlalchemy import text
+
+        # 验证order_by字段是否存在
+        if not hasattr(self.model, order_by):
+            raise AttributeError(f"Model {self.model.__name__} has no attribute {order_by}")
+
+        direction = "DESC" if descending else "ASC"
+        query_sql = f"SELECT * FROM {self.model.__tablename__} ORDER BY {order_by} {direction} LIMIT 1"
+
+        result = await self.session.execute(text(query_sql))
+        row = result.fetchone()
+
+        if row is None:
+            return None
+
+        # 将Row对象转换为模型实例
+        return self._row_to_model(row)

@@ -102,3 +102,54 @@ class OnePagerResponse(BaseModel):
     generated_at: str
     source_ids: List[str]
     video_titles: List[str]
+
+
+# ===== 实体相关 Schemas =====
+
+class EntityBase(BaseModel):
+    """实体基础模型"""
+    name: str
+    type: str
+    description: Optional[str] = None
+
+
+class EntityResponse(EntityBase):
+    """实体响应模型"""
+    id: str
+    mention_count: int
+    first_seen_at: str
+    last_seen_at: str
+
+
+class EntityMentionItem(BaseModel):
+    """实体提及项"""
+    id: str
+    source_id: str
+    timestamp: float
+    context: Optional[str] = None
+    confidence: float = 1.0
+
+
+class EntityDetailResponse(EntityBase):
+    """实体详情响应"""
+    id: str
+    mention_count: int
+    mentions: List[EntityMentionItem]
+
+
+class EntityListResponse(BaseModel):
+    """实体列表响应"""
+    entities: List[EntityResponse]
+
+
+class EntityMentionListResponse(BaseModel):
+    """实体提及列表响应"""
+    entity_id: str
+    mentions: List[EntityMentionItem]
+
+
+class ExtractEntitiesResponse(BaseModel):
+    """实体抽取响应"""
+    source_id: str
+    entity_count: int
+    entities: List[EntityResponse]

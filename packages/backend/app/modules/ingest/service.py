@@ -15,6 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import get_settings
 from app.modules.source.models import Source, SourceStatus
 
+# Import extended search components
+from .sources import get_searcher, SearchResult
+
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
@@ -221,6 +224,204 @@ class IngestService:
     def update_task(self, task_id: str, status: Dict[str, Any]):
         """Update task status."""
         self._tasks[task_id] = status
+
+    # ==================== Extended search methods ====================
+
+    async def multi_platform_search(
+        self,
+        query: str,
+        platforms: List[str],
+        max_results: int = 10,
+        content_type: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Search multiple platforms concurrently.
+
+        Args:
+            query: Search query string
+            platforms: List of platform names (bilibili, youtube, arxiv)
+            max_results: Maximum results per platform
+            content_type: Optional filter by content type
+
+        Returns:
+            Dictionary with all search results
+        """
+        all_results = []
+        platforms_searched = []
+
+        # Create search tasks for each platform
+        search_tasks = []
+        for platform in platforms:
+            try:
+                searcher = get_searcher(platform)
+
+                # Filter by content type if specified
+                if content_type and content_type != "all":
+                    if searcher.content_type.value != content_type:
+                        logger.info(f"[Ingest] Skipping {platform}: content type mismatch")
+                        continue
+
+                search_tasks.append(self._search_platform(searcher, query, max_results))
+                platforms_searched.append(platform)
+
+            except ValueError as e:
+                logger.warning(f"[Ingest] {e}")
+                continue
+
+        # Run searches concurrently
+        if search_tasks:
+            search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+
+            for result in search_results:
+                if isinstance(result, Exception):
+                    logger.error(f"[Ingest] Search error: {result}")
+                elif isinstance(result, list):
+                    all_results.extend(result)
+
+        return {
+            "results": [r.to_dict() for r in all_results],
+            "total_count": len(all_results),
+            "platforms_searched": platforms_searched,
+        }
+
+    async def _search_platform(
+        self,
+        searcher,
+        query: str,
+        max_results: int
+    ) -> List[SearchResult]:
+        """Search a single platform."""
+        try:
+            logger.info(f"[Ingest] Searching {searcher.platform_name} for '{query}'")
+            results = await searcher.search(query, max_results)
+            logger.info(f"[Ingest] Found {len(results)} results from {searcher.platform_name}")
+            return results
+        except Exception as e:
+            logger.error(f"[Ingest] Error searching {searcher.platform_name}: {e}")
+            return []
+
+    async def fetch_and_process(
+        self,
+        content_id: str,
+        platform: str,
+        auto_analyze: bool = True
+    ) -> str:
+        """
+        Fetch content from platform and process it.
+
+        Args:
+            content_id: Content ID (with prefix, e.g., bili_12345)
+            platform: Platform name
+            auto_analyze: Whether to trigger auto-analysis
+
+        Returns:
+            Task ID for tracking progress
+        """
+        task_id = self.create_task()
+        self.update_task(task_id, {
+            "status": "fetching",
+            "progress": 10,
+            "message": f"正在获取 {platform} 内容...",
+        })
+
+        # Run fetch in background
+        thread = threading.Thread(
+            target=self._run_fetch_task,
+            args=(task_id, content_id, platform, auto_analyze),
+            daemon=True
+        )
+        thread.start()
+
+        return task_id
+
+    def _run_fetch_task(
+        self,
+        task_id: str,
+        content_id: str,
+        platform: str,
+        auto_analyze: bool
+    ):
+        """Background task to fetch and process content."""
+        import asyncio
+        import traceback
+        from app.core.database import async_session
+
+        async def fetch_and_create():
+            """Async function to handle the entire fetch and create process."""
+            # Get searcher and download
+            searcher = get_searcher(platform)
+            download_dir = UPLOADS_DIR
+            download_dir.mkdir(parents=True, exist_ok=True)
+
+            # Update task status
+            self.update_task(task_id, {
+                "status": "downloading",
+                "progress": 20,
+                "message": "正在下载内容...",
+            })
+
+            # Download content
+            file_path = await searcher.download(content_id, str(download_dir))
+
+            self.update_task(task_id, {
+                "status": "ingesting",
+                "progress": 60,
+                "message": "正在导入数据库...",
+            })
+
+            # Get content info
+            content_info = await searcher.fetch_video_info(content_id)
+
+            title = content_info.get("title", f"Content_{content_id}")
+            if not title or title == "Unknown":
+                title = f"{platform.upper()} {content_id}"
+
+            # Create source record
+            async with async_session() as db:
+                file_path_obj = Path(file_path)
+
+                # Check if source already exists
+                result = await db.execute(
+                    select(Source).where(Source.file_path == str(file_path_obj))
+                )
+                existing = result.scalar_one_or_none()
+
+                if existing:
+                    return existing.id
+
+                source = Source(
+                    id=str(uuid.uuid4()),
+                    title=title,
+                    file_path=str(file_path_obj),
+                    url=content_info.get("url", ""),
+                    file_type="video" if platform != "arxiv" else "document",
+                    platform=platform,
+                    status=SourceStatus.IMPORTED.value,
+                )
+                db.add(source)
+                await db.flush()
+                await db.commit()
+                return source.id
+
+        try:
+            # Run async function in new event loop
+            source_id = asyncio.run(fetch_and_create())
+
+            self.update_task(task_id, {
+                "status": "completed",
+                "progress": 100,
+                "message": f"成功导入内容",
+                "source_ids": [source_id],
+            })
+
+        except Exception as e:
+            logger.error(f"[Ingest] Fetch task failed: {e}")
+            logger.error(traceback.format_exc())
+            self.update_task(task_id, {
+                "status": "error",
+                "progress": 0,
+                "message": f"获取失败: {str(e)}",
+            })
 
 
 _ingest_service: Optional[IngestService] = None
