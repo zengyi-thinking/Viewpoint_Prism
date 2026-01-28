@@ -1,17 +1,20 @@
+import { useState, useEffect } from 'react'
 import {
   Panel,
   PanelGroup,
   PanelResizeHandle,
 } from 'react-resizable-panels'
 import { useAppStore } from '@/stores/app-store'
+import { useAuthStore } from '@/stores/auth-store'
 import { Header } from './Header'
 import { VideoPlayer } from '@/components/panels/StagePanel'
 import { ChatPanel } from '@/features/chat'
 import { SourcesPanel } from '@/features/sources'
 import { IngestPanel } from '@/features/ingest'
 import { AnalysisPanel } from '@/features/analysis'
+import { ProjectPanel } from '@/components/project'
 import { cn } from '@/lib/utils'
-import { List, Search } from 'lucide-react'
+import { List, Search, Layers } from 'lucide-react'
 
 // Resize Handle Component
 function ResizeHandle({
@@ -42,6 +45,74 @@ function ResizeHandle({
 
 export default function MainLayout() {
   const { panelVisibility, leftPanelMode, setLeftPanelMode } = useAppStore()
+  const { currentProject } = useAuthStore()
+  const [showProjectPanel, setShowProjectPanel] = useState(false)
+  const [showCreateForm, setShowCreateForm] = useState(false)
+
+  // 监听工程管理事件
+  useEffect(() => {
+    const handleCreateProject = () => {
+      setShowCreateForm(true)
+      setShowProjectPanel(true)
+    }
+
+    const handleManageProject = () => {
+      setShowCreateForm(false)
+      setShowProjectPanel(true)
+    }
+
+    window.addEventListener('project:create', handleCreateProject as EventListener)
+    window.addEventListener('project:manage', handleManageProject as EventListener)
+
+    return () => {
+      window.removeEventListener('project:create', handleCreateProject as EventListener)
+      window.removeEventListener('project:manage', handleManageProject as EventListener)
+    }
+  }, [])
+
+  // 如果没有当前工程，显示欢迎面板
+  if (!currentProject) {
+    return (
+      <div className="h-screen w-screen flex flex-col p-4 gap-4 text-sm select-none bg-[#050507]">
+        <Header />
+        <div className="flex-1 flex items-center justify-center">
+          <div className="floating-panel p-8 max-w-md w-full mx-4 text-center fade-in">
+            <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto mb-6">
+              <Layers className="w-8 h-8 text-black" />
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-3">欢迎使用视界棱镜</h2>
+            <p className="text-[--text-sub] mb-6">
+              开始您的多源视频情报分析之旅
+            </p>
+            <button
+              onClick={() => {
+                setShowCreateForm(true)
+                setShowProjectPanel(true)
+              }}
+              className="w-full py-3 px-4 bg-white hover:bg-gray-100 text-black font-semibold rounded-lg transition-colors"
+            >
+              创建第一个工程
+            </button>
+            <button
+              onClick={() => {
+                setShowCreateForm(false)
+                setShowProjectPanel(true)
+              }}
+              className="w-full mt-3 py-3 px-4 topbar-btn font-semibold rounded-lg transition-colors"
+            >
+              管理现有工程
+            </button>
+          </div>
+        </div>
+        {showProjectPanel && (
+          <ProjectPanel
+            onClose={() => setShowProjectPanel(false)}
+            initialCreateMode={showCreateForm}
+          />
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="h-screen w-screen flex flex-col p-4 gap-4 text-sm select-none bg-[#050507]">
@@ -137,6 +208,14 @@ export default function MainLayout() {
           )}
         </PanelGroup>
       </div>
+
+      {/* Project Management Modal */}
+      {showProjectPanel && (
+        <ProjectPanel
+          onClose={() => setShowProjectPanel(false)}
+          initialCreateMode={showCreateForm}
+        />
+      )}
     </div>
   )
 }

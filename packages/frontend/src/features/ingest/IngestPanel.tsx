@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAppStore } from '@/stores/app-store'
-import { Search, Play, RefreshCw, ExternalLink, Clock, FileText, Download } from 'lucide-react'
+import { Search, Play, RefreshCw, ExternalLink, Clock, FileText, Download, CheckSquare, Square } from 'lucide-react'
 import { IngestAPI } from '@/api/modules/ingest'
 import type {
   SearchResultItem,
@@ -53,6 +53,8 @@ export function IngestPanel() {
   const [isSearching, setIsSearching] = useState(false)
   const [selectedItems, setSelectedItems] = useState<string[]>([])
   const [searchResults, setSearchResults] = useState<SearchResultItem[]>([])
+  const [importingItems, setImportingItems] = useState<Set<string>>(new Set())
+  const [importStatus, setImportStatus] = useState<Record<string, string>>({})
 
   const togglePlatform = (platform: Platform) => {
     setSelectedPlatforms(prev =>
@@ -108,9 +110,19 @@ export function IngestPanel() {
       selectedItems.includes(item.id)
     )
 
-    // Import each item using fetch API
+    // 开始导入，更新状态
+    setImportingItems(new Set(selectedItems))
+    setImportStatus({})
+    setSelectedItems([])
+
+    // 导入每个项目
     for (const item of itemsToImport) {
       try {
+        setImportStatus(prev => ({
+          ...prev,
+          [item.id]: '正在导入...'
+        }))
+
         const response = await IngestAPI.fetchContent({
           content_id: item.id,
           platform: item.platform as Platform,
@@ -119,36 +131,87 @@ export function IngestPanel() {
 
         console.log(`Import started for ${item.id}:`, response.task_id)
 
-        // Poll for completion
+        // 轮询完成状态
         const pollImport = async () => {
           let attempts = 0
-          while (attempts < 30) {
+          while (attempts < 60) { // 最多等待2分钟
             await new Promise(resolve => setTimeout(resolve, 2000))
             try {
               const status = await IngestAPI.getTaskStatus(response.task_id)
-              if (status.status === 'completed' || status.status === 'error') {
-                if (status.status === 'completed') {
-                  console.log(`Import completed for ${item.id}`)
-                  await fetchSources()
-                }
+
+              if (status.status === 'completed') {
+                setImportStatus(prev => ({
+                  ...prev,
+                  [item.id]: '✓ 导入成功'
+                }))
+
+                // 移除从导入中列表
+                setImportingItems(prev => {
+                  const newSet = new Set(prev)
+                  newSet.delete(item.id)
+                  return newSet
+                })
+
+                // 刷新源列表
+                await fetchSources()
                 break
+              } else if (status.status === 'error') {
+                setImportStatus(prev => ({
+                  ...prev,
+                  [item.id]: '✗ 导入失败'
+                }))
+                setImportingItems(prev => {
+                  const newSet = new Set(prev)
+                  newSet.delete(item.id)
+                  return newSet
+                })
+                break
+              } else if (status.status === 'processing') {
+                setImportStatus(prev => ({
+                  ...prev,
+                  [item.id]: `处理中... ${status.progress || 0}%`
+                }))
               }
             } catch (e) {
               console.error('Error polling import status:', e)
+              setImportStatus(prev => ({
+                ...prev,
+                [item.id]: '✗ 状态查询失败'
+              }))
               break
             }
             attempts++
           }
+
+          // 超时处理
+          if (attempts >= 60) {
+            setImportStatus(prev => ({
+              ...prev,
+              [item.id]: '⏱ 导入超时'
+            }))
+            setImportingItems(prev => {
+              const newSet = new Set(prev)
+              newSet.delete(item.id)
+              return newSet
+            })
+          }
         }
 
-        // Start polling in background
+        // 启动后台轮询
         pollImport()
       } catch (error) {
         console.error(`Failed to import ${item.id}:`, error)
+        setImportStatus(prev => ({
+          ...prev,
+          [item.id]: '✗ 启动失败'
+        }))
+        setImportingItems(prev => {
+          const newSet = new Set(prev)
+          newSet.delete(item.id)
+          return newSet
+        })
       }
     }
-
-    setSelectedItems([])
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -265,18 +328,48 @@ export function IngestPanel() {
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-zinc-400">
-                找到 {searchResults.length} 个结果
-              </span>
-              {selectedItems.length > 0 && (
+            {/* 结果统计和批量操作栏 */}
+            <div className="sticky top-0 bg-zinc-900/95 backdrop-blur-sm p-3 -mx-5 border-b border-zinc-800/50 z-10">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-zinc-400">
+                    找到 <span className="text-white font-medium">{searchResults.length}</span> 个结果
+                  </span>
+                  {/* 全选/取消全选按钮 */}
+                  <button
+                    onClick={() => {
+                      if (selectedItems.length === searchResults.length) {
+                        setSelectedItems([])
+                      } else {
+                        setSelectedItems(searchResults.map(item => item.id))
+                      }
+                    }}
+                    className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                  >
+                    {selectedItems.length === searchResults.length ? '取消全选' : '全选'}
+                  </button>
+                </div>
+
+                {/* 导入按钮 - 始终显示，没有选中时禁用 */}
                 <button
                   onClick={handleImportSelected}
-                  className="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-xs transition-colors flex items-center gap-1.5"
+                  disabled={selectedItems.length === 0}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+                    selectedItems.length > 0
+                      ? 'bg-blue-500 hover:bg-blue-600 text-white shadow-lg shadow-blue-500/25'
+                      : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                  }`}
                 >
-                  <Download className="w-3 h-3" />
-                  导入选中 ({selectedItems.length})
+                  <Download className="w-4 h-4" />
+                  {selectedItems.length > 0 ? `导入选中 (${selectedItems.length})` : '请先勾选内容'}
                 </button>
+              </div>
+
+              {/* 勾选提示 */}
+              {selectedItems.length === 0 && (
+                <p className="text-xs text-zinc-600 mt-2">
+                  💡 点击每项左侧的复选框勾选要导入的内容
+                </p>
               )}
             </div>
 
@@ -284,31 +377,40 @@ export function IngestPanel() {
               {searchResults.map((item) => (
                 <div
                   key={item.id}
-                  className={`p-3 rounded-xl border transition-all ${
+                  className={`group relative p-3 rounded-xl border transition-all ${
                     selectedItems.includes(item.id)
                       ? 'border-blue-500 bg-blue-500/10'
                       : 'border-zinc-800 bg-zinc-900/50 hover:border-zinc-700'
                   }`}
                 >
                   <div className="flex gap-3">
+                    {/* 明显的复选框 */}
                     <button
                       onClick={() => {
+                        if (importingItems.has(item.id)) return // 导入中禁止操作
                         if (selectedItems.includes(item.id)) {
                           setSelectedItems(selectedItems.filter(id => id !== item.id))
                         } else {
                           setSelectedItems([...selectedItems, item.id])
                         }
                       }}
-                      className={`w-16 h-12 rounded-lg bg-zinc-800 flex items-center justify-center shrink-0 transition-colors ${
-                        selectedItems.includes(item.id) ? 'ring-2 ring-blue-500' : ''
+                      disabled={importingItems.has(item.id)}
+                      className={`w-12 h-12 rounded-lg bg-zinc-800 flex items-center justify-center shrink-0 transition-all ${
+                        selectedItems.includes(item.id) ? 'ring-2 ring-blue-500 bg-blue-500/20' :
+                        importingItems.has(item.id) ? 'opacity-50 cursor-not-allowed' :
+                        'hover:bg-zinc-700'
                       }`}
+                      aria-label={
+                        importingItems.has(item.id) ? '导入中' :
+                        selectedItems.includes(item.id) ? '取消勾选' : '勾选'
+                      }
                     >
                       {selectedItems.includes(item.id) ? (
-                        <span className="text-blue-400 text-lg">✓</span>
-                      ) : item.content_type === 'paper' ? (
-                        <FileText className="w-5 h-5 text-zinc-600" />
+                        <CheckSquare className="w-5 h-5 text-blue-400" />
+                      ) : importingItems.has(item.id) ? (
+                        <RefreshCw className="w-5 h-5 text-blue-400 animate-spin" />
                       ) : (
-                        <Play className="w-4 h-4 text-zinc-600" />
+                        <Square className="w-5 h-5 text-zinc-600" />
                       )}
                     </button>
 
@@ -338,6 +440,19 @@ export function IngestPanel() {
                             <span className="flex items-center gap-1">
                               <Clock className="w-3 h-3" />
                               {formatDuration(item.duration)}
+                            </span>
+                          </>
+                        )}
+                        {/* 导入状态显示 */}
+                        {importStatus[item.id] && (
+                          <>
+                            <span>·</span>
+                            <span className={`${
+                              importStatus[item.id].includes('✓') ? 'text-green-400' :
+                              importStatus[item.id].includes('✗') || importStatus[item.id].includes('超时') ? 'text-red-400' :
+                              'text-blue-400'
+                            }`}>
+                              {importStatus[item.id]}
                             </span>
                           </>
                         )}

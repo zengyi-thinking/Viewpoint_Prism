@@ -7,6 +7,26 @@ import uuid as uuid_lib
 from app.core.database import Base
 
 
+class Project(Base):
+    """工程模型 - 定义在 models.py 中以便其他模型引用"""
+    __tablename__ = "projects"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid_lib.uuid4()))
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    owner_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships - 与 auth.models 中的 User 关联
+    # 注意：这些 relationship 将在 SQLAlchemy 初始化时通过 backref 自动连接
+    owner = relationship("User", back_populates="owned_projects", foreign_keys=[owner_id])
+    members = relationship("ProjectMember", back_populates="project", cascade="all, delete-orphan", foreign_keys="ProjectMember.project_id")
+    access_history = relationship("ProjectAccessHistory", back_populates="project", cascade="all, delete-orphan", foreign_keys="ProjectAccessHistory.project_id")
+    sources = relationship("Source", back_populates="project", cascade="all, delete-orphan")
+
+
 class SourceStatus(str, PyEnum):
     """Video source processing status."""
     IMPORTED = "imported"  # Imported but not yet analyzed (Phase 12: Lazy Analysis)
@@ -31,11 +51,13 @@ class Source(Base):
     duration = Column(Float, nullable=True)  # Duration in seconds
     thumbnail = Column(String(512), nullable=True)
     status = Column(String(20), default=SourceStatus.UPLOADED.value)
+    project_id = Column(String(36), ForeignKey("projects.id"), nullable=True, index=True)  # 工程关联（向后兼容）
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
     evidences = relationship("Evidence", back_populates="source", cascade="all, delete-orphan")
+    project = relationship("Project", back_populates="sources")
 
 
 class Evidence(Base):
@@ -55,6 +77,11 @@ class Evidence(Base):
     # Relationships
     source = relationship("Source", back_populates="evidences")
 
+    @property
+    def project_id(self):
+        """通过 source 关联获取 project_id"""
+        return self.source.project_id if self.source else None
+
 
 class AnalysisResult(Base):
     """Analysis result model for storing AI analysis outputs."""
@@ -65,7 +92,11 @@ class AnalysisResult(Base):
     session_id = Column(String(64), nullable=False, index=True)
     result_type = Column(String(50), nullable=False)  # conflict, graph, timeline
     data = Column(Text, nullable=False)  # JSON string
+    project_id = Column(String(36), ForeignKey("projects.id"), nullable=True, index=True)  # 工程关联
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    project = relationship("Project")
 
 
 class ChatMessage(Base):
@@ -78,7 +109,11 @@ class ChatMessage(Base):
     role = Column(String(20), nullable=False)  # user, assistant
     content = Column(Text, nullable=False)
     references = Column(Text, nullable=True)  # JSON string of references
+    project_id = Column(String(36), ForeignKey("projects.id"), nullable=True, index=True)  # 工程关联
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    project = relationship("Project")
 
 
 # ===== 实体和关系模型 =====

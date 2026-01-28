@@ -120,7 +120,8 @@ class YouTubeSearcher(PlatformSearcher):
 
     async def download(self, content_id: str, output_path: str) -> str:
         """
-        Download YouTube video using yt-dlp.
+        Download YouTube video using yt-dlp via subprocess.
+        使用subprocess调用yt-dlp命令行，确保使用正确的环境变量。
 
         Args:
             content_id: YouTube video ID (with or without 'yt_' prefix)
@@ -130,6 +131,8 @@ class YouTubeSearcher(PlatformSearcher):
             Path to downloaded video file
         """
         from pathlib import Path
+        import os
+        import asyncio
 
         # Remove prefix if present
         video_id = content_id.replace("yt_", "")
@@ -138,36 +141,70 @@ class YouTubeSearcher(PlatformSearcher):
         output_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            import yt_dlp
+            # 设置ffmpeg路径
+            ffmpeg_path = r"D:\software\ffmpeg-master-latest-win64-gpl-shared\bin\ffmpeg.exe"
+            if not os.path.exists(ffmpeg_path):
+                raise SearchError(f"ffmpeg not found at {ffmpeg_path}")
 
-            ydl_opts = {
-                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-                'outtmpl': str(output_dir / '%(id)s.%(ext)s'),
-                'noplaylist': True,
-                'quiet': False,
-                'no_warnings': False,
-            }
+            # 设置环境变量
+            env = os.environ.copy()
+            env['PATH'] = os.path.dirname(ffmpeg_path) + os.pathsep + env.get('PATH', '')
 
             video_url = f"https://www.youtube.com/watch?v={video_id}"
+            logger.info(f"[YouTubeSearcher] Downloading from: {video_url}")
+            logger.info(f"[YouTubeSearcher] Using ffmpeg at: {ffmpeg_path}")
 
-            loop = __import__('asyncio').get_event_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: self._download_video(video_url, ydl_opts)
+            # 构建yt-dlp命令
+            cmd = [
+                'yt-dlp',
+                '--ffmpeg-location', ffmpeg_path,
+                '--format', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                '--output', str(output_dir / '%(id)s.%(ext)s'),
+                '--no-playlist',
+                '--newline',
+                video_url
+            ]
+
+            logger.info(f"[YouTubeSearcher] Running command: {' '.join(cmd)}")
+
+            # 运行yt-dlp
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env
             )
+
+            stdout, stderr = await process.communicate()
+
+            if process.returncode != 0:
+                error_msg = stderr.decode('utf-8', errors='ignore')
+                logger.error(f"[YouTubeSearcher] yt-dlp failed: {error_msg}")
+                raise SearchError(f"yt-dlp failed: {error_msg}")
 
             # Find downloaded file
             for ext in ['mp4', 'webm', 'mkv']:
                 video_path = output_dir / f"{video_id}.{ext}"
                 if video_path.exists():
-                    logger.info(f"[YouTubeSearcher] Downloaded {video_path}")
+                    logger.info(f"[YouTubeSearcher] Successfully downloaded: {video_path}")
                     return str(video_path)
+
+            # 如果没找到，尝试glob匹配
+            downloaded_files = list(output_dir.glob(f"{video_id}*"))
+            if downloaded_files:
+                logger.info(f"[YouTubeSearcher] Found downloaded file: {downloaded_files[0]}")
+                return str(downloaded_files[0])
+
+            # 列出目录中的所有文件进行调试
+            all_files = list(output_dir.glob("*"))
+            logger.error(f"[YouTubeSearcher] No file found. Directory contents: {[f.name for f in all_files]}")
 
             raise SearchError(f"Downloaded file not found for {video_id}")
 
         except ImportError:
-            raise SearchError("yt-dlp is not installed")
+            raise SearchError("yt-dlp is not installed. Run: pip install yt-dlp")
         except Exception as e:
+            logger.error(f"[YouTubeSearcher] Download error: {e}")
             raise SearchError(f"Failed to download YouTube video: {e}")
 
     def _download_video(self, url: str, opts: dict) -> None:

@@ -1,4 +1,6 @@
 import { useAppStore } from '@/stores/app-store'
+import { useAuthStore } from '@/stores/auth-store'
+import { useNavigate } from 'react-router-dom'
 import {
   Layers,
   Search,
@@ -10,8 +12,12 @@ import {
   BarChart3,
   Zap,
   Save,
+  LogOut,
+  User,
+  Settings,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { ProjectSwitcher } from '@/components/common'
 
 export function Header() {
   const {
@@ -20,6 +26,14 @@ export function Header() {
     panelVisibility,
     togglePanel,
   } = useAppStore()
+
+  const { user, logout } = useAuthStore()
+  const navigate = useNavigate()
+
+  const handleLogout = async () => {
+    await logout()
+    navigate('/login')
+  }
 
   return (
     <header className="floating-panel shrink-0 z-30 overflow-visible">
@@ -73,31 +87,28 @@ export function Header() {
           </button>
         </div>
 
-        {/* Status */}
+        {/* Status & User Info */}
         <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
-          <div className="topbar-pill px-3 py-2 flex items-center gap-2 text-[11px] text-zinc-300">
-            <span className="relative inline-flex h-2 w-2">
-              <span className="absolute inline-flex h-2 w-2 rounded-full bg-emerald-400 opacity-75 animate-ping"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-            </span>
-            <span className="font-mono">
-              {language === 'zh' ? 'R1 引擎在线' : 'R1 Engine Online'}
-            </span>
-          </div>
+          {/* 工程切换器 */}
+          <ProjectSwitcher />
 
-          <button
-            className="topbar-btn w-[34px] h-[34px] flex items-center justify-center rounded-xl text-zinc-300 hover:text-white"
-            title="Settings"
-          >
-            <Sliders className="w-4 h-4" />
-          </button>
+          {/* 用户菜单 */}
+          {user && (
+            <div className="flex items-center gap-2">
+              <div className="topbar-pill px-3 py-2 flex items-center gap-2 text-[11px] text-zinc-300">
+                <User className="w-3 h-3" />
+                <span className="font-medium">{user.username}</span>
+              </div>
 
-          <button
-            className="topbar-btn w-[34px] h-[34px] flex items-center justify-center rounded-xl text-zinc-300 hover:text-white"
-            title="Help"
-          >
-            <HelpCircle className="w-4 h-4" />
-          </button>
+              <button
+                onClick={handleLogout}
+                className="topbar-btn w-[34px] h-[34px] flex items-center justify-center rounded-xl text-zinc-300 hover:text-white hover:bg-red-900/30"
+                title="登出"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -189,6 +200,13 @@ export function Header() {
           <button className="topbar-btn px-3 py-2 text-[11px] text-zinc-200 flex items-center gap-2">
             <Save className="w-3 h-3 text-zinc-400" />
             <span>Snapshot</span>
+          </button>
+
+          <button
+            className="topbar-btn w-[34px] h-[34px] flex items-center justify-center rounded-xl text-zinc-300 hover:text-white"
+            title="Settings"
+          >
+            <Settings className="w-4 h-4" />
           </button>
         </div>
       </div>

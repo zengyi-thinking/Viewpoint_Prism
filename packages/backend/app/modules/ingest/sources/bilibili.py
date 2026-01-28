@@ -130,9 +130,49 @@ class BilibiliSearcher(PlatformSearcher):
         except (ValueError, AttributeError):
             return 0
 
+    async def fetch_video_info(self, content_id: str) -> dict:
+        """Fetch video information from Bilibili."""
+        bvid = content_id.replace("bili_", "")
+        video_url = f"https://www.bilibili.com/video/{bvid}"
+
+        try:
+            import yt_dlp
+
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': True,
+            }
+
+            def extract_info():
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    return ydl.extract_info(video_url, download=False)
+
+            loop = __import__('asyncio').get_event_loop()
+            info = await loop.run_in_executor(None, extract_info)
+
+            return {
+                "id": info.get('id', bvid),
+                "title": info.get('title', f"Video_{bvid}"),
+                "url": info.get('webpage_url') or video_url,
+                "description": info.get('description', ''),
+                "thumbnail": info.get('thumbnail', ''),
+                "duration": info.get('duration'),
+                "author": info.get('uploader') or info.get('channel', ''),
+            }
+
+        except Exception as e:
+            logger.warning(f"[BilibiliSearcher] Failed to fetch video info: {e}")
+            return {
+                "id": bvid,
+                "title": f"Bilibili_{bvid}",
+                "url": video_url,
+            }
+
     async def download(self, content_id: str, output_path: str) -> str:
         """
-        Download Bilibili video using yt-dlp.
+        Download Bilibili video using yt-dlp via subprocess.
+        使用subprocess调用yt-dlp命令行，确保使用正确的环境变量。
 
         Args:
             content_id: Bilibili video ID (with or without 'bili_' prefix)
@@ -142,6 +182,10 @@ class BilibiliSearcher(PlatformSearcher):
             Path to downloaded video file
         """
         from pathlib import Path
+        import subprocess
+        import json
+        import os
+        import asyncio
 
         # Remove prefix if present
         bvid = content_id.replace("bili_", "")
@@ -150,32 +194,79 @@ class BilibiliSearcher(PlatformSearcher):
         output_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            import yt_dlp
+            # 设置ffmpeg路径
+            ffmpeg_path = r"D:\software\ffmpeg-master-latest-win64-gpl-shared\bin\ffmpeg.exe"
+            if not os.path.exists(ffmpeg_path):
+                raise SearchError(f"ffmpeg not found at {ffmpeg_path}")
 
-            ydl_opts = {
-                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-                'outtmpl': str(output_dir / '%(id)s.%(ext)s'),
-                'noplaylist': True,
-                'quiet': False,
-                'no_warnings': False,
-            }
+            # 设置环境变量
+            env = os.environ.copy()
+            env['PATH'] = os.path.dirname(ffmpeg_path) + os.pathsep + env.get('PATH', '')
 
             video_url = f"https://www.bilibili.com/video/{bvid}"
+            logger.info(f"[BilibiliSearcher] Downloading from: {video_url}")
+            logger.info(f"[BilibiliSearcher] Using ffmpeg at: {ffmpeg_path}")
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(video_url, download=True)
-                video_id = info.get('id', bvid)
+            # 构建yt-dlp命令
+            cmd = [
+                'yt-dlp',
+                '--ffmpeg-location', ffmpeg_path,
+                '--format', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                '--output', str(output_dir / '%(id)s.%(ext)s'),
+                '--no-playlist',
+                '--newline',
+                video_url
+            ]
+
+            logger.info(f"[BilibiliSearcher] Running command: {' '.join(cmd)}")
+            logger.info(f"[BilibiliSearcher] PATH contains ffmpeg: {os.path.dirname(ffmpeg_path) in env.get('PATH', '')}")
+
+            # 运行yt-dlp
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env
+            )
+
+            logger.info(f"[BilibiliSearcher] Process PID: {process.pid}")
+            stdout, stderr = await process.communicate()
+            logger.info(f"[BilibiliSearcher] Process finished, return code: {process.returncode}")
+
+            stdout_str = stdout.decode('utf-8', errors='ignore')
+            stderr_str = stderr.decode('utf-8', errors='ignore')
+
+            logger.info(f"[BilibiliSearcher] yt-dlp stdout: {stdout_str[:500]}")
+            logger.error(f"[BilibiliSearcher] yt-dlp stderr: {stderr_str[:500]}")
+            logger.info(f"[BilibiliSearcher] yt-dlp return code: {process.returncode}")
+
+            if process.returncode != 0:
+                error_msg = stderr_str or stdout_str or "Unknown error"
+                logger.error(f"[BilibiliSearcher] yt-dlp failed: {error_msg}")
+                raise SearchError(f"yt-dlp failed: {error_msg}")
 
             # Find downloaded file
-            for ext in ['mp4', 'flv', 'webm']:
-                video_path = output_dir / f"{video_id}.{ext}"
+            possible_extensions = ['mp4', 'flv', 'webm', 'mkv']
+            for ext in possible_extensions:
+                video_path = output_dir / f"{bvid}.{ext}"
                 if video_path.exists():
-                    logger.info(f"[BilibiliSearcher] Downloaded {video_path}")
+                    logger.info(f"[BilibiliSearcher] Successfully downloaded: {video_path}")
                     return str(video_path)
+
+            # 如果没找到，列出目录中的所有文件
+            downloaded_files = list(output_dir.glob(f"{bvid}*"))
+            if downloaded_files:
+                logger.info(f"[BilibiliSearcher] Found downloaded file: {downloaded_files[0]}")
+                return str(downloaded_files[0])
+
+            # 列出目录中的所有文件进行调试
+            all_files = list(output_dir.glob("*"))
+            logger.error(f"[BilibiliSearcher] No file found. Directory contents: {[f.name for f in all_files]}")
 
             raise SearchError(f"Downloaded file not found for {bvid}")
 
         except ImportError:
-            raise SearchError("yt-dlp is not installed")
+            raise SearchError("yt-dlp is not installed. Run: pip install yt-dlp")
         except Exception as e:
+            logger.error(f"[BilibiliSearcher] Download error: {e}")
             raise SearchError(f"Failed to download Bilibili video: {e}")

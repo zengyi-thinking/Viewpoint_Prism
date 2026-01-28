@@ -4,6 +4,7 @@ Ingest service - Network video search and download.
 
 import asyncio
 import uuid
+import os
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 import logging
@@ -24,6 +25,12 @@ settings = get_settings()
 DATA_DIR = settings.resolve_path("data")
 STATIC_DIR = settings.resolve_path(settings.upload_dir).parent
 UPLOADS_DIR = settings.resolve_path(settings.upload_dir)
+
+# 在模块加载时设置ffmpeg路径
+FFMPEG_PATH = r"D:\software\ffmpeg-master-latest-win64-gpl-shared\bin\ffmpeg.exe"
+if os.path.exists(FFMPEG_PATH):
+    os.environ['PATH'] = os.path.dirname(FFMPEG_PATH) + os.pathsep + os.environ.get('PATH', '')
+    logger.info(f"[Ingest] Set ffmpeg path at module load: {FFMPEG_PATH}")
 
 
 class IngestService:
@@ -317,6 +324,13 @@ class IngestService:
         Returns:
             Task ID for tracking progress
         """
+        import os
+        # Set ffmpeg path in environment at the start
+        ffmpeg_path = r"D:\software\ffmpeg-master-latest-win64-gpl-shared\bin\ffmpeg.exe"
+        if os.path.exists(ffmpeg_path):
+            os.environ['PATH'] = os.path.dirname(ffmpeg_path) + os.pathsep + os.environ.get('PATH', '')
+            logger.info(f"[Ingest] Set ffmpeg path in fetch_and_process: {ffmpeg_path}")
+
         task_id = self.create_task()
         self.update_task(task_id, {
             "status": "fetching",
@@ -324,30 +338,32 @@ class IngestService:
             "message": f"正在获取 {platform} 内容...",
         })
 
-        # Run fetch in background
-        thread = threading.Thread(
-            target=self._run_fetch_task,
-            args=(task_id, content_id, platform, auto_analyze),
-            daemon=True
+        # Run fetch in background using asyncio.create_task
+        asyncio.create_task(
+            self._run_fetch_task_async(task_id, content_id, platform, auto_analyze)
         )
-        thread.start()
 
         return task_id
 
-    def _run_fetch_task(
+    async def _run_fetch_task_async(
         self,
         task_id: str,
         content_id: str,
         platform: str,
         auto_analyze: bool
     ):
-        """Background task to fetch and process content."""
-        import asyncio
+        """Async task to fetch and process content."""
+        import os
         import traceback
         from app.core.database import async_session
 
-        async def fetch_and_create():
-            """Async function to handle the entire fetch and create process."""
+        try:
+            # Set ffmpeg path in environment before download
+            ffmpeg_path = r"D:\software\ffmpeg-master-latest-win64-gpl-shared\bin\ffmpeg.exe"
+            if os.path.exists(ffmpeg_path):
+                os.environ['PATH'] = os.path.dirname(ffmpeg_path) + os.pathsep + os.environ.get('PATH', '')
+                logger.info(f"[Ingest] Set ffmpeg path: {ffmpeg_path}")
+
             # Get searcher and download
             searcher = get_searcher(platform)
             download_dir = UPLOADS_DIR
@@ -361,7 +377,9 @@ class IngestService:
             })
 
             # Download content
+            logger.info(f"[Ingest] Starting download for {content_id} from {platform}")
             file_path = await searcher.download(content_id, str(download_dir))
+            logger.info(f"[Ingest] Download completed: {file_path}")
 
             self.update_task(task_id, {
                 "status": "ingesting",
@@ -387,25 +405,21 @@ class IngestService:
                 existing = result.scalar_one_or_none()
 
                 if existing:
-                    return existing.id
-
-                source = Source(
-                    id=str(uuid.uuid4()),
-                    title=title,
-                    file_path=str(file_path_obj),
-                    url=content_info.get("url", ""),
-                    file_type="video" if platform != "arxiv" else "document",
-                    platform=platform,
-                    status=SourceStatus.IMPORTED.value,
-                )
-                db.add(source)
-                await db.flush()
-                await db.commit()
-                return source.id
-
-        try:
-            # Run async function in new event loop
-            source_id = asyncio.run(fetch_and_create())
+                    source_id = existing.id
+                else:
+                    source = Source(
+                        id=str(uuid.uuid4()),
+                        title=title,
+                        file_path=str(file_path_obj),
+                        url=content_info.get("url", ""),
+                        file_type="video" if platform != "arxiv" else "document",
+                        platform=platform,
+                        status=SourceStatus.IMPORTED.value,
+                    )
+                    db.add(source)
+                    await db.flush()
+                    await db.commit()
+                    source_id = source.id
 
             self.update_task(task_id, {
                 "status": "completed",
@@ -415,13 +429,55 @@ class IngestService:
             })
 
         except Exception as e:
-            logger.error(f"[Ingest] Fetch task failed: {e}")
+            error_msg = str(e) if str(e) else repr(e)
+            logger.error(f"[Ingest] Fetch task failed (async): {error_msg}")
+            logger.error(f"[Ingest] Exception type: {type(e).__name__}")
             logger.error(traceback.format_exc())
             self.update_task(task_id, {
                 "status": "error",
                 "progress": 0,
-                "message": f"获取失败: {str(e)}",
+                "message": f"获取失败: {error_msg}",
             })
+
+    def _run_fetch_task_sync(
+        self,
+        task_id: str,
+        content_id: str,
+        platform: str,
+        auto_analyze: bool
+    ):
+        """Synchronous wrapper for background task."""
+        import os
+        import asyncio
+        import traceback
+
+        logger.info(f"[Ingest] _run_fetch_task_sync START: task_id={task_id}, content_id={content_id}")
+
+        # Set ffmpeg path in environment
+        ffmpeg_path = r"D:\software\ffmpeg-master-latest-win64-gpl-shared\bin\ffmpeg.exe"
+        if os.path.exists(ffmpeg_path):
+            os.environ['PATH'] = os.path.dirname(ffmpeg_path) + os.pathsep + os.environ.get('PATH', '')
+            logger.info(f"[Ingest] Set ffmpeg path in _run_fetch_task_sync: {ffmpeg_path}")
+            logger.info(f"[Ingest] PATH contains ffmpeg: {os.path.dirname(ffmpeg_path) in os.environ.get('PATH', '')}")
+
+        try:
+            loop = asyncio.get_event_loop()
+            logger.info(f"[Ingest] Got event loop: {loop}")
+        except RuntimeError:
+            logger.info(f"[Ingest] No event loop, creating new one")
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        try:
+            result = loop.run_until_complete(
+                self._run_fetch_task_async(task_id, content_id, platform, auto_analyze)
+            )
+            logger.info(f"[Ingest] _run_fetch_task_sync COMPLETED: {result}")
+        except Exception as e:
+            error_msg = str(e) if str(e) else repr(e)
+            logger.error(f"[Ingest] _run_fetch_task_sync FAILED: {error_msg}")
+            logger.error(traceback.format_exc())
+
 
 
 _ingest_service: Optional[IngestService] = None

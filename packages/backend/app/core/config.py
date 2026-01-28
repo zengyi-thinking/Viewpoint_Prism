@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     temp_dir: str = "data/temp"
     max_upload_size: int = 1073741824  # 1GB
 
+    # ========== Authentication & Security ==========
+    secret_key: str = "your-secret-key-change-in-production"  # 生产环境必须修改
+    algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60 * 24  # 24小时
+
     def resolve_path(self, path_value: str) -> Path:
         """Resolve a path against the project root."""
         path = Path(path_value)

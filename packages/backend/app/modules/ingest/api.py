@@ -216,12 +216,37 @@ async def fetch_content(request: FetchContentRequest):
     Downloads the content and creates a source record in the database.
     Returns a task ID for tracking progress.
     """
+    import os
+    import traceback
+
+    # Set ffmpeg path
+    ffmpeg_path = r"D:\software\ffmpeg-master-latest-win64-gpl-shared\bin\ffmpeg.exe"
+    if os.path.exists(ffmpeg_path):
+        os.environ['PATH'] = os.path.dirname(ffmpeg_path) + os.pathsep + os.environ.get('PATH', '')
+
     ingest = get_ingest_service()
-    task_id = await ingest.fetch_and_process(
-        content_id=request.content_id,
-        platform=request.platform.value,
-        auto_analyze=request.auto_analyze
-    )
+
+    # Create task
+    task_id = ingest.create_task()
+    ingest.update_task(task_id, {
+        "status": "fetching",
+        "progress": 10,
+        "message": f"正在获取 {request.platform.value} 内容...",
+    })
+
+    # 直接await（同步等待，临时方案）
+    try:
+        await ingest._run_fetch_task_async(
+            task_id,
+            request.content_id,
+            request.platform.value,
+            request.auto_analyze
+        )
+    except Exception as e:
+        error_msg = str(e) if str(e) else repr(e)
+        logger.error(f"[Ingest] Fetch failed: {error_msg}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"导入失败: {error_msg}")
 
     return FetchContentResponse(
         task_id=task_id,

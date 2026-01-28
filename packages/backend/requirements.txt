@@ -36,5 +36,10 @@ httpx>=0.26.0
 aiofiles>=23.2.1
 Pillow>=10.0.0
 
+# Authentication & Security
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+pydantic[email]>=2.5.3
+
 # ASR - Local Whisper (for offline speech-to-text)
 openai-whisper>=20231117
